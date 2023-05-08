@@ -1,0 +1,4 @@
+- hosts: manager agent
+
+  roles:
+    - cloudnode

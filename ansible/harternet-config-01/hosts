@@ -1,14 +1,14 @@
 # The Ansible DevOps host configuration for CloudStack
 
 # cloudstack management server(s)
-[acs-management]
+[manager]
 cloud01
 
 # cloudstack database server(s)
-[acs-database]
+[database]
 cloud01
 
 # cloudstack agent servers
-[acs-agent]
+[agent]
 cloud01
 cloud02
