@@ -1,0 +1,63 @@
+# Install mysql server on node with database role
+- name: Install MySql server and needed packages on node with database role
+  apt:
+    name: mysql-server
+    state: present
+
+- name: Install python 3 MySql library access for use by ansible
+  apt:
+    name: python3-mysqldb
+    state: present
+    
+- name: Ensure MySql specific configurations directory exists
+  file:
+    path: /etc/mysql/conf.d
+    state: directory
+    
+- name: Configure MySql server with cloudstack specific configurations
+  template:
+    src: cloudstack.cnf.j2
+    dest: /etc/mysql/conf.d/cloudstack.cnf
+
+# can ignore errors here because if script rerun the root password is already set and this
+# will fail
+- name: Set database root password to something instead default of no password
+  mysql_user:
+    user: root
+    # TODO: this fails first time when there is no root password, but fails without
+    #   this when run after root password set
+    login_password: "{{ mysql_root_password }}"
+    update_password: always
+    password: "{{ mysql_root_password }}"
+    host: localhost
+
+# perform tasks done by the mysql_secure_installation
+- name: Ensure test database is absent
+  mysql_db:
+    login_password: "{{ mysql_root_password }}"
+    name: test
+    state: absent
+
+- name: Ensure anonymous users are absent
+  mysql_user:
+    login_password: "{{ mysql_root_password }}"
+    name: ''
+    state: absent
+    host_all: true
+
+# TODO: actually, do we need remote access if we are going to install the database
+# separate from the management node?  Or is that done by a different cloud user?
+- name: Remove remote root access from database
+  community.mysql.mysql_query:
+    login_password: "{{ mysql_root_password }}"
+    query:
+      - DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1')
+    
+
+- name: Ensure MySql service is restarted and enabled
+  service:
+    name: mysql
+    state: restarted
+    enabled: yes
+
+      

@@ -15,6 +15,9 @@
     state: absent
   
 # TODO: could/should also create variables for dns names
+# TODO: default interface name becomes cloudbr0 after applied first time,
+#   so cannot use ansible_default_ipv4.interface?
+# TODO: the default router should probably become a variable
 - name: Create basic cloud node network configuration using netplan
   template: src=01-netcfg.yaml.j2 dest=/etc/netplan/01-netcfg.yaml
 
@@ -27,4 +30,3 @@
 - name: Apply new netplan network configuration
   command: netplan apply
   ignore_errors: true
-  

@@ -1,11 +1,22 @@
 - hosts: manager database agent
 
+  # TODO: separate out into files, put secrets in separate file not saved in repo
   vars:
     management_ip: 192.168.0.9
     cloudstack_version: 4.18
-    
+    mysql_root_password: Tbiwtts4U
+      
   roles:
     - node
     - network
     - cloudstackrepo
 
+- hosts: database
+
+  # TODO: separate out into files, put secrets in separate file not saved in repo
+  vars:
+    mysql_root_password: Tbiwtts4U
+
+  roles:
+    - database
+    
