@@ -83,9 +83,16 @@
 - name: Create basic cloud node network configuration using netplan
   template: src=01-netcfg.yaml.j2 dest=/etc/netplan/01-netcfg.yaml
 
+# apply fails if we are redoing, so can safely ignore error here which means nothing
+# new needed to be applied
 - name: Generate new netplan plan
   command: netplan generate
-
+  ignore_errors: true
+  
 - name: Apply new netplan network configuration
   command: netplan apply
+  ignore_errors: true
   
+# miscellaneous, add aliases and other things to make command line admin easier
+- name: Create common aliases for administrators
+  template: src=bash_aliases.j2 dest=/root/.bash_aliases
