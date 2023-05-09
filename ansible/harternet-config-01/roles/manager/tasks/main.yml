@@ -1,0 +1,12 @@
+# install and configure cloudstack management node
+- name: Ensure Apache CloudStack management packages are installed and present
+  apt:
+    name: cloudstack-management
+
+# TODO: should we set/generate separate passwords for all of these, e.g. cloud password,
+#   keystore password, etc.?
+- name: Setup the cloudstack database
+  command: cloudstack-setup-databases cloud:{{ mysql_cloud_password }}@localhost --deploy-as=root:{{ mysql_root_password }}  -m {{ mysql_cloud_password }} -k {{ mysql_cloud_password }} -i {{ cloud_database }}
+
+- name: Setup the cloudstack manager
+  command: cloudstack-setup-management

@@ -2,10 +2,10 @@
 
   # TODO: separate out into files, put secrets in separate file not saved in repo
   vars:
-    management_ip: 192.168.0.9
+    ansible_manager_ip: 192.168.0.9
+    cloud_database: cloud01
     cloudstack_version: 4.18
-    mysql_root_password: Tbiwtts4U
-      
+    
   roles:
     - node
     - network
@@ -14,9 +14,29 @@
 - hosts: database
 
   # TODO: separate out into files, put secrets in separate file not saved in repo
+  # TODO: besides cloud password, probably should have separte keystore password and -m
+  #   option password.  Also could/should we generate all of these at random and put into
+  #   separate secrets variable file
   vars:
     mysql_root_password: Tbiwtts4U
+    mysql_cloud_password: Tbiwtts4U
 
   roles:
     - database
     
+- hosts: manager
+
+  # TODO: separate out into files, put secrets in separate file not saved in repo
+  # TODO: besides cloud password, probably should have separte keystore password and -m
+  #   option password.  Also could/should we generate all of these at random and put into
+  #   separate secrets variable file
+  vars:
+  vars:
+    cloud_database: cloud01
+    mysql_root_password: Tbiwtts4U
+    mysql_cloud_password: Tbiwtts4U
+
+
+  roles:
+    - manager
+

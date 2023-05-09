@@ -22,7 +22,7 @@
   lineinfile:
     path: /etc/hosts.allow
     regexp: '^sshd:.*'
-    line: 'sshd: {{ management_ip }}'
+    line: 'sshd: {{ ansible_manager_ip }}'
     state: present
 
 - name: Ensure all other hosts are denied ssh access
