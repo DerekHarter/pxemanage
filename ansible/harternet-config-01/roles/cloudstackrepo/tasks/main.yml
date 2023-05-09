@@ -1,0 +1,18 @@
+# fetch apache cloudstack signing key to verify apache package authenticity
+- name: Fetch Apache CloudStack signing key
+  get_url:
+    url: http://download.cloudstack.org/release.asc
+    dest: /etc/apt/keyrings/cloudstack.asc
+
+- name: Convert cloudstack signing key to gpg format
+  command:
+    cmd: gpg --output /etc/apt/keyrings/cloudstack.gpg --dearmor /etc/apt/keyrings/cloudstack.asc
+    creates: /etc/apt/keyrings/cloudstack.gpg
+  
+# add appache CloudStack package repository to the node
+- name: Add Apache CloudStack package repository to the node
+  template: src=cloudstack.list.j2 dest=/etc/apt/sources.list.d/cloudstack.list
+
+- name: Update repository database to pull in CloudStack packages to node package list
+  apt: update_cache=yes force_apt_get=yes cache_valid_time=3600
+
