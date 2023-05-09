@@ -1,0 +1,30 @@
+# setup cloud node common network configurations
+# we copy in a hosts file, but may want to set up DNS instead in future
+- name: Setup common static /etc/hosts file for call cloud nodes
+  template: src=hosts.j2 dest=/etc/hosts
+  
+
+- name: Install bridge-utils and other networking tools so can set up networking bridges
+  apt:
+    name: bridge-utils, net-tools, intel-microcode
+    state: present
+
+- name: Remove default install config netplan file
+  file:
+    path: /etc/netplan/00-installer-config.yaml
+    state: absent
+  
+# TODO: could/should also create variables for dns names
+- name: Create basic cloud node network configuration using netplan
+  template: src=01-netcfg.yaml.j2 dest=/etc/netplan/01-netcfg.yaml
+
+# apply fails if we are redoing, so can safely ignore error here which means nothing
+# new needed to be applied
+- name: Generate new netplan plan
+  command: netplan generate
+  ignore_errors: true
+  
+- name: Apply new netplan network configuration
+  command: netplan apply
+  ignore_errors: true
+  

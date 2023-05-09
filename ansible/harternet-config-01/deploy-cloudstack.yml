@@ -4,4 +4,5 @@
     management_ip: 192.168.0.9
 
   roles:
-    - cloudnode
+    - node
+    - network
