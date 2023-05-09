@@ -1,4 +1,7 @@
-- hosts: manager agent
+- hosts: manager database agent
+
+  vars:
+    management_ip: 192.168.0.9
 
   roles:
     - cloudnode

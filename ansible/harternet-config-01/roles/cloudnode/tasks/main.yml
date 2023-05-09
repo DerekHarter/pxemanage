@@ -1,6 +1,91 @@
+# Make sure node package list is updated and all packages upgraded
 - name: Update apt-get repo and cache
   apt: update_cache=yes force_apt_get=yes cache_valid_time=3600
 
 - name: Upgrade all apt packages
   apt: upgrade=dist force_apt_get=yes
 
+# basic security, remove temporary user, tighten up sshd access to this node
+- name: Remove temporary cloudstack users
+  user:
+    name: cloudstack
+    groups: cloudstack
+    state: absent
+    remove: yes
+
+- name: Ensure ansible management server is only allowed host
+  lineinfile:
+    path: /etc/hosts.allow
+    regexp: '^sshd:.*'
+    line: 'sshd: {{ management_ip }}'
+    state: present
+
+- name: Ensure all other hosts are denied ssh access
+  lineinfile:
+    path: /etc/hosts.deny
+    regexp: '^sshd:.*'
+    line: 'sshd: ALL'
+    state: present
+
+    
+- name: Disable SSH password authentication
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#PasswordAuthentication.*'
+    line: 'PasswordAuthentication no'
+
+- name: Enable only ssh public key authentication to host
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#PubkeyAuthentication.*'
+    line: 'PubkeyAuthentication yes'
+    
+- name: Restart sshd
+  service:
+    name: sshd
+    state: restarted
+
+# setup server time sync and time zone
+- name: Set timezone to America/Chicago
+  timezone:
+    name: America/Chicago
+
+- name: Install chrony for server time synchronization
+  apt:
+    name: chrony
+    state: present
+  
+- name: Restart chrony service to ensure time is being synchronized and enable the service on reboot
+  service:
+    name: chrony
+    state: restarted
+    enabled: yes
+
+# setup cloud node common network configurations
+# we copy in a hosts file, but may want to set up DNS instead in future
+- name: Setup common static /etc/hosts file for call cloud nodes
+  template: src=hosts.j2 dest=/etc/hosts
+  
+
+- name: Install bridge-utils and other networking tools so can set up networking bridges
+  apt:
+    name: bridge-utils, net-tools, intel-microcode
+    state: present
+
+- name: Remove default install config netplan file
+  file:
+    path: /etc/netplan/00-installer-config.yaml
+    state: absent
+  
+# TODO: should we be a bit more flexible, e.g. what if network device interface
+#   name is not eno1?
+# TODO: could/should also create variables for dns names
+- name: Create basic cloud node network configuration using netplan
+  template: src=01-netcfg.yaml.j2 dest=/etc/netplan/01-netcfg.yaml
+
+- name: Generate new netplan plan
+  command: netplan generate
+
+- name: Apply new netplan network configuration
+  command: netplan apply
+  
