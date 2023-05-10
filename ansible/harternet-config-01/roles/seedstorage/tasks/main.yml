@@ -1,0 +1,38 @@
+# Temporarily mount nfs secondary storage from the nfs media server.  The system vm
+# template is downloaded and put into the cloud secondary storage
+- name: Ensure temporary secondary storage mount point exists
+  file:
+    path: "{{ tmp_nfs_path }}"
+    state: directory
+
+- name: Ensure secondary storage is mounted for download
+  mount:
+    src: "{{ nfs_server_ip }}:{{ secondary_nfs_path }}"
+    path: "{{ tmp_nfs_path }}"
+    fstype: nfs
+    opts: nolock
+    state: mounted
+
+# TODO: use specific password for -s management server key here, not reuse cloud password
+# TODO: this is not a cloudstack module, so it will be rerun everytime called in
+#   deployment.  So might be good to detect if already done and skip?
+# Usage: cloud-install-sys-tmplt:
+#	-m secondary storage mount point
+#	-u http url for system vm template
+#	-h hypervisor name: kvm|vmware|xenserver|hyperv|ovm3
+#	-s mgmt server secret key
+#	-F clean up system templates of specified hypervisor
+- name: Download system VM and seed into secondary storage
+  command: /usr/share/cloudstack-common/scripts/storage/secondary/cloud-install-sys-tmplt -m {{ tmp_nfs_path }} -u {{ cloudstack_system_kvm_url  }} -h kvm -s {{ mysql_cloud_password }} -F
+    
+# Unmount the temporary storage and remove the mount point which are no longer needed
+- name: Unmount the temporary secondary storage nfs mount
+  mount:
+    path: "{{ tmp_nfs_path }}"
+    state: unmounted
+
+- name: Remove the temporary secondary mount point directory
+  file:
+    path: "{{ tmp_nfs_path }}"
+    state: absent
+  

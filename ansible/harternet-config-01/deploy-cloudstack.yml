@@ -22,6 +22,7 @@
     - vars/secrets.yml
   roles:
     - manager
+    - seedstorage
 
 # the agent role configures hosts that act as cloudstack compute nodes agents
 

@@ -5,6 +5,8 @@
 
 # TODO: should we set/generate separate passwords for all of these, e.g. cloud password,
 #   keystore password, etc.?
+# TODO: this is not a cloudstack module, so it will be rerun everytime called in
+#   deployment.  So might be good to detect if already done and skip?
 - name: Setup the cloudstack database
   command: cloudstack-setup-databases cloud:{{ mysql_cloud_password }}@localhost --deploy-as=root:{{ mysql_root_password }}  -m {{ mysql_cloud_password }} -k {{ mysql_cloud_password }} -i {{ cloud_database }}
 
