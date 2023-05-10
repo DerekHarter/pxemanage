@@ -26,7 +26,7 @@
     user: root
     # TODO: this fails first time when there is no root password, but fails without
     #   this when run after root password set
-    login_password: "{{ mysql_root_password }}"
+    login_password: ""
     update_password: always
     password: "{{ mysql_root_password }}"
     host: localhost
@@ -46,7 +46,7 @@
     host_all: true
 
 # TODO: actually, do we need remote access if we are going to install the database
-# separate from the management node?  Or is that done by a different cloud user?
+#   separate from the management node?  Or is that done by a different cloud user?
 - name: Remove remote root access from database
   community.mysql.mysql_query:
     login_password: "{{ mysql_root_password }}"

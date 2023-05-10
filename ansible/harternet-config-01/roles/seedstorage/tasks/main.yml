@@ -13,7 +13,6 @@
     opts: nolock
     state: mounted
 
-# TODO: use specific password for -s management server key here, not reuse cloud password
 # TODO: this is not a cloudstack module, so it will be rerun everytime called in
 #   deployment.  So might be good to detect if already done and skip?
 # Usage: cloud-install-sys-tmplt:
@@ -23,7 +22,7 @@
 #	-s mgmt server secret key
 #	-F clean up system templates of specified hypervisor
 - name: Download system VM and seed into secondary storage
-  command: /usr/share/cloudstack-common/scripts/storage/secondary/cloud-install-sys-tmplt -m {{ tmp_nfs_path }} -u {{ cloudstack_system_kvm_url  }} -h kvm -s {{ mysql_cloud_password }} -F
+  command: /usr/share/cloudstack-common/scripts/storage/secondary/cloud-install-sys-tmplt -m {{ tmp_nfs_path }} -u {{ cloudstack_system_kvm_url  }} -h kvm -s {{ management_secret_key }} -F
     
 # Unmount the temporary storage and remove the mount point which are no longer needed
 - name: Unmount the temporary secondary storage nfs mount

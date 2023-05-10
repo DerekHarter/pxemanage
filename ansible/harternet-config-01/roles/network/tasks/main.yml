@@ -13,20 +13,17 @@
   file:
     path: /etc/netplan/00-installer-config.yaml
     state: absent
+
+- name: Get status of 01-netcfg file and skip configuration if it already exists
+  stat: path=/etc/netplan/01-netcfg.yaml
+  register: netplan_config_file
   
-# TODO: could/should also create variables for dns names
-# TODO: default interface name becomes cloudbr0 after applied first time,
-#   so cannot use ansible_default_ipv4.interface?
-# TODO: the default router should probably become a variable
 - name: Create basic cloud node network configuration using netplan
   template: src=01-netcfg.yaml.j2 dest=/etc/netplan/01-netcfg.yaml
-
-# apply fails if we are redoing, so can safely ignore error here which means nothing
-# new needed to be applied
+  when: netplan_config_file.stat.exists == False
+  
 - name: Generate new netplan plan
   command: netplan generate
-  ignore_errors: true
   
 - name: Apply new netplan network configuration
   command: netplan apply
-  ignore_errors: true
