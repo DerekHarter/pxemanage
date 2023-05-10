@@ -1,8 +1,11 @@
 # Global variables used over all roles and tasks for
 # cloudstack ansible deployments in this project
 
-# The ip address of ansible management machine
+# The ip address of management machine
+# TODO: could/should we get these, especially our cloud manager ips, through introspection or
+#  ansible facts?
 ansible_manager_ip: 192.168.0.9
+cloud_manager_ip: 192.168.0.3
 
 # the specific version of cloudstack management and agent being setup
 cloudstack_version: 4.18

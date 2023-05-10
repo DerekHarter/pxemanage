@@ -48,12 +48,22 @@
     dest: /etc/apparmor.d/disable/usr.lib.libvirt.virt-aa-helper
     state: link
 
+- name: Get status of libvirtd apparmor profile
+  stat: path=/etc/apparmor.d/usr.sbin.libvirtd
+  register: apparmor_libvirtd_profile
+  
 - name: Run apparmor parser to pick up usr sbin libvirt disabled
   command: apparmor_parser -R /etc/apparmor.d/usr.sbin.libvirtd
+  when: apparmor_libvirtd_profile.stat.exists == False
 
+- name: Get status of libvirt helper apparmor profile
+  stat: path=/etc/apparmor.d/usr.lib.libvirt.virt-aa-helper
+  register: apparmor_libvirt_helper_profile
+  
 - name: Run apparmor parser to pick up usr lib libvirt helper disabled
   command: apparmor_parser -R /etc/apparmor.d/usr.lib.libvirt.virt-aa-helper
-
+  when: apparmor_libvirt_helper_profile.stat.exists == False
+  
 # TODO: these masked services still seem to be running after masking, should they
 #   be stopped as well?
 - name: Mask libvirtd sockets so that we can listen in older style for tcp connections
@@ -93,11 +103,8 @@
     state: restarted
     enabled: true
 
-# TODO: would like to copy the cloudstack management key to root .ssh authorized keys
-#   on all agents.  This allows us to use this key instead of root password from
-#   management gui
-#- name: Copy cloudstack management key from ansible manager buffer to the agent node
-#  authorized_key:
-#    user: root
-#    state: present
-#    key: "{{ lookup(''file', 'buffer/manager-id_rsa.pub') }}"
+- name: Copy cloudstack management key from ansible manager buffer to the agent node
+  authorized_key:
+    user: root
+    state: present
+    key: "{{ lookup('file', 'keys/manager-id_rsa.pub') }}"

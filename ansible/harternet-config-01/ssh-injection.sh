@@ -23,6 +23,7 @@ sshargs="-o StrictHostKeyChecking=no -o PubkeyAuthentication=no -o PreferredAuth
 # generate the cloudstack management key that will be used if none exists
 if [ ! -f "$keyname" ]
 then
+    mkdir -p keys
     ssh-keygen -a 100 -t ed25519 -f "$keyname" -C "$email" -q -N ""
 fi
 

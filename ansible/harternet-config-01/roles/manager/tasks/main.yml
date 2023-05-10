@@ -12,3 +12,9 @@
 
 - name: Setup the cloudstack manager
   command: cloudstack-setup-management
+
+- name: Fetch the management key from cloudstack manager to a local file on ansible manager
+  fetch:
+    src: "/var/lib/cloudstack/management/.ssh/id_rsa.pub"
+    dest: "keys/manager-id_rsa.pub"
+    flat: true
