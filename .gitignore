@@ -1,3 +1,4 @@
 # don't put any private or public keys into the repo
 *.key
 *.pub
+secrets.yml

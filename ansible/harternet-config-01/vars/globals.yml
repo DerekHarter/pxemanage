@@ -1,0 +1,14 @@
+# Global variables used over all roles and tasks for
+# cloudstack ansible deployments in this project
+
+# The ip address of ansible management machine
+ansible_manager_ip: 192.168.0.9
+
+# the specific version of cloudstack management and agent being setup
+cloudstack_version: 4.18
+
+# The cloud database server node machine name, this machine runs the
+# mysql database and is connected by management and agent
+cloud_database: cloud01
+
+  
