@@ -1,0 +1,103 @@
+# install and configure cloudstack agent compute nodes
+- name: Ensure Apache CloudStack agent and needed kvm qemu packages are installed and present
+  apt:
+    pkg:
+      - cloudstack-agent
+      - qemu-kvm
+
+- name: Configure agent properties so that guest cpu mode uses hosts model
+  lineinfile:
+    path: /etc/cloudstack/agent/agent.properties
+    regexp: '^#guest.cpu.mode=.*'
+    line: 'guest.cpu.mode=host-model'
+    
+- name: Configure qemu to set it to listen for connections
+  lineinfile:
+    path: /etc/libvirt/qemu.conf
+    regexp: '^#vnc_listen =.*'
+    line: 'vnc_listen = "0.0.0.0"'
+
+- name: Configure libvirtd to listen for connections
+  lineinfile:
+    path: /etc/default/libvirtd
+    regexp: 'LIBVIRTD_ARGS=""'
+    line: 'LIBVIRTD_ARGS="--listen"'
+    
+- name: Create cloudstack specific libvirtd configurations
+  blockinfile:
+    dest: /etc/libvirt/libvirtd.conf
+    block: |
+      # cloudstack libvirtd configuration
+      listen_tls = 0
+      listen_tcp = 1
+      tls_port = "16514"
+      tcp_port = "16509"
+      auth_tcp = "none"
+      mdns_adv = 0
+    
+# disable apparmor configs
+- name: Disable apparmor usr sbin libvirtd file
+  file:
+    src: /etc/apparmor.d/usr.sbin.libvirtd
+    dest: /etc/apparmor.d/disable/usr.sbin.libvirtd
+    state: link
+
+- name: Disable apparmor usr lib libvirt helper file
+  file:
+    src: /etc/apparmor.d/usr.lib.libvirt.virt-aa-helper
+    dest: /etc/apparmor.d/disable/usr.lib.libvirt.virt-aa-helper
+    state: link
+
+- name: Run apparmor parser to pick up usr sbin libvirt disabled
+  command: apparmor_parser -R /etc/apparmor.d/usr.sbin.libvirtd
+
+- name: Run apparmor parser to pick up usr lib libvirt helper disabled
+  command: apparmor_parser -R /etc/apparmor.d/usr.lib.libvirt.virt-aa-helper
+
+# TODO: these masked services still seem to be running after masking, should they
+#   be stopped as well?
+- name: Mask libvirtd sockets so that we can listen in older style for tcp connections
+  systemd:
+    name: libvirtd.socket
+    masked: true
+
+- name: Mask libvirtd-ro sockets so that we can listen in older style for tcp connections
+  systemd:
+    name: libvirtd-ro.socket
+    masked: true
+
+- name: Mask libvirtd-admin sockets so that we can listen in older style for tcp connections
+  systemd:
+    name: libvirtd-admin.socket
+    masked: true
+
+- name: Mask libvirtd-tls sockets so that we can listen in older style for tcp connections
+  systemd:
+    name: libvirtd-tls.socket
+    masked: true
+
+- name: Disable libvirtd-tcp sockets so that we can listen in older style for tcp connections
+  systemd:
+    name: libvirtd-tcp.socket
+    masked: true
+
+- name: Ensure libvirtd service is restarted and enabled
+  systemd:
+    name: libvirtd
+    state: restarted
+    enabled: true
+
+- name: Ensure cloudstack-agent service is restarted and enabled
+  systemd:
+    name: cloudstack-agent
+    state: restarted
+    enabled: true
+
+# TODO: would like to copy the cloudstack management key to root .ssh authorized keys
+#   on all agents.  This allows us to use this key instead of root password from
+#   management gui
+#- name: Copy cloudstack management key from ansible manager buffer to the agent node
+#  authorized_key:
+#    user: root
+#    state: present
+#    key: "{{ lookup(''file', 'buffer/manager-id_rsa.pub') }}"
