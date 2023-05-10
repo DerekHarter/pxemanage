@@ -2,8 +2,9 @@
 - name: Ensure Apache CloudStack management packages are installed and present
   apt:
     name: cloudstack-management
+    update_cache: true
 
-# TODO: this is not a cloudstack module, so it will be rerun everytime called in
+# TODO: this is not an ansible module, so it will be rerun everytime called in
 #   deployment.  So might be good to detect if already done and skip?
 # Usage: cloudstack-setup-databases user:[password]@mysqlhost:[port] [--deploy-as=rootuser:[rootpassword]] [--auto=/path/to/server-setup.xml] [-e ENCRYPTIONTYPE] [-m MGMTSECRETKEY] [-k DBSECRETKEY] [-g ENCRYPTORVERSION] [--debug]
 #
@@ -22,8 +23,3 @@
 - name: Setup the cloudstack manager
   command: cloudstack-setup-management
 
-- name: Fetch the management key from cloudstack manager to a local file on ansible manager
-  fetch:
-    src: "/var/lib/cloudstack/management/.ssh/id_rsa.pub"
-    dest: "keys/manager-id_rsa.pub"
-    flat: true

@@ -103,8 +103,8 @@
     state: restarted
     enabled: true
 
-- name: Copy cloudstack management key from ansible manager buffer to the agent node
-  authorized_key:
-    user: root
-    state: present
-    key: "{{ lookup('file', 'keys/manager-id_rsa.pub') }}"
+#- name: Copy cloudstack management key from ansible manager buffer to the agent node
+#  authorized_key:
+#    user: root
+#    state: present
+#    key: "{{ lookup('file', 'keys/manager-id_rsa.pub') }}"

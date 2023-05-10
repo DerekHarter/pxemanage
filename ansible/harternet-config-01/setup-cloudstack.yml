@@ -1,0 +1,20 @@
+# gather the keys from all cloudstack management servers locally to this ansible management node
+# TODO: in future if want to have multipe HA managers, will need to modify to support
+#   downloading and injecting multiple cloudstack management keys
+- hosts: manager
+  tasks:
+    - name: Fetch the management key from cloudstack manager to a local file on ansible manager
+      fetch:
+        src: "/var/lib/cloudstack/management/.ssh/id_rsa.pub"
+        dest: "keys/manager-id_rsa.pub"
+        flat: true
+
+# now distribute keys to all cloudstack aganets
+- hosts: agent
+  tasks:
+    - name: Copy cloudstack management key from ansible manager buffer to the agent node
+      authorized_key:
+        user: root
+        state: present
+        key: "{{ lookup('file', 'keys/manager-id_rsa.pub') }}"
+  

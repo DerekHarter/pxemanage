@@ -2,3 +2,7 @@
 *.key
 *.pub
 secrets.yml
+
+# ignore editor backup files
+\#*\#
+.\#*

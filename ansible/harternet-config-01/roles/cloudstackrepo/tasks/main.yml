@@ -14,5 +14,5 @@
   template: src=cloudstack.list.j2 dest=/etc/apt/sources.list.d/cloudstack.list
 
 - name: Update repository database to pull in CloudStack packages to node package list
-  apt: update_cache=yes force_apt_get=yes cache_valid_time=3600
+  apt: update_cache=true
 

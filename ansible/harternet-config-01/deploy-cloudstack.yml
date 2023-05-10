@@ -7,7 +7,7 @@
     - network
     - cloudstackrepo
 
-# the database role configurs host that run the cloudstack mysql database
+# the database role configures host that run the cloudstack mysql database
 - hosts: database
   vars_files:
     - vars/globals.yml

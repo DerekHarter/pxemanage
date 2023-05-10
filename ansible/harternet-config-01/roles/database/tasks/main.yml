@@ -19,9 +19,21 @@
     src: cloudstack.cnf.j2
     dest: /etc/mysql/conf.d/cloudstack.cnf
 
-# can ignore errors here because if script rerun the root password is already set and this
-# will fail
-- name: Set database root password to something instead default of no password
+# perform tasks done by the mysql_secure_installation, set a root password and
+# remove anonymous users and test databases
+# Resetting the root password is not idempotent, it failes if run a second
+# time.  So explicitly if root password is unset
+- name: Check if root password is unset
+  shell: >-
+    mysql -u root
+    -p'{{ mysql_root_password }}'
+    -h localhost
+    -e 'quit'
+  changed_when: false
+  ignore_errors: true
+  register: root_pwd_check
+    
+- name: Set database root password to something instead default of no password if it is not set
   mysql_user:
     user: root
     # TODO: this fails first time when there is no root password, but fails without
@@ -30,8 +42,8 @@
     update_password: always
     password: "{{ mysql_root_password }}"
     host: localhost
+  when: root_pwd_check.rc != 0
 
-# perform tasks done by the mysql_secure_installation
 - name: Ensure test database is absent
   mysql_db:
     login_password: "{{ mysql_root_password }}"
