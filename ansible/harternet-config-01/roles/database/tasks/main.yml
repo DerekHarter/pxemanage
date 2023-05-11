@@ -26,7 +26,6 @@
 - name: Check if root password is unset
   shell: >-
     mysql -u root
-    -p'{{ mysql_root_password }}'
     -h localhost
     -e 'quit'
   changed_when: false
@@ -36,13 +35,11 @@
 - name: Set database root password to something instead default of no password if it is not set
   mysql_user:
     user: root
-    # TODO: this fails first time when there is no root password, but fails without
-    #   this when run after root password set
     login_password: ""
     update_password: always
     password: "{{ mysql_root_password }}"
     host: localhost
-  when: root_pwd_check.rc != 0
+  when: root_pwd_check.rc == 0
 
 - name: Ensure test database is absent
   mysql_db:
