@@ -14,7 +14,7 @@ fi
 hostname=$1
 username=cloudstack
 password=cloudstack
-keyname="keys/cloudstack.key"
+keyname="keys/ansiblemanagement.key"
 email="admin@harter.priv"
 management_ip="192.168.0.9"
 sshaddr="$username@$hostname"
