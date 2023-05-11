@@ -25,3 +25,9 @@ cloud_database: cloud01
 nfs_server_ip: 192.168.0.2
 tmp_nfs_path: /mnt/secondary
 secondary_nfs_path: /export/secondary
+
+# TODO: for the moment we will just set an explicit variable to
+#   detect if running deploy a subsequent time, so that we
+#   can skip over tasks that should not be done a second time
+#   and are not ansible idemopotent
+deploy: true

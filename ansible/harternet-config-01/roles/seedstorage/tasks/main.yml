@@ -23,7 +23,8 @@
 #	-F clean up system templates of specified hypervisor
 - name: Download system VM and seed into secondary storage
   command: /usr/share/cloudstack-common/scripts/storage/secondary/cloud-install-sys-tmplt -m {{ tmp_nfs_path }} -u {{ cloudstack_system_kvm_url  }} -h kvm -s {{ management_secret_key }} -F
-    
+  when: deploy
+  
 # Unmount the temporary storage and remove the mount point which are no longer needed
 - name: Unmount the temporary secondary storage nfs mount
   mount:

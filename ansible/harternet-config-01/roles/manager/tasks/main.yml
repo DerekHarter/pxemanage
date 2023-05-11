@@ -19,7 +19,8 @@
 #                        default it will try to detect a local IP
 - name: Setup the cloudstack database
   command: cloudstack-setup-databases cloud:{{ mysql_cloud_password }}@localhost --deploy-as=root:{{ mysql_root_password }}  -m {{ management_secret_key }} -k {{ database_secret_key }} -i {{ cloud_manager_ip }}
-
+  when: deploy
+  
 - name: Setup the cloudstack manager
   command: cloudstack-setup-management
-
+  when: deploy

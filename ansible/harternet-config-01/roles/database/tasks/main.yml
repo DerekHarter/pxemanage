@@ -23,7 +23,7 @@
 # remove anonymous users and test databases
 # Resetting the root password is not idempotent, it failes if run a second
 # time.  So explicitly if root password is unset
-- name: Check if root password is unset
+- name: Check if root password is unset, NOTE it is common for this to fail as the root password should usuallbe be set
   shell: >-
     mysql -u root
     -h localhost
