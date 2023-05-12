@@ -11,13 +11,22 @@
     force_apt_get: yes
 
 # basic security, remove temporary user, tighten up sshd access to this node
+# TODO: This is no longer working because before this we login withthe cloudstack
+#   user to inject our ssh keys.  Apparently there are still user processes hanging
+#   around.  Need to force them to be cleaned up, or maybe we could move this to
+#   setup, though it really belongs here.
+- name: Kill all cloudstack processes so we don't error when we remove the user
+  command: killall -u cloudstack -w
+  ignore_errors: true
+
 - name: Remove temporary cloudstack users
   user:
     name: cloudstack
     groups: cloudstack
     state: absent
     remove: yes
-
+  ignore_errors: true
+    
 - name: Ensure ansible management server is only allowed host
   lineinfile:
     path: /etc/hosts.allow
@@ -32,7 +41,8 @@
     line: 'sshd: ALL'
     state: present
 
-    
+
+# disable passwords and password auth and only allow ssh auth
 - name: Disable SSH password authentication
   lineinfile:
     path: /etc/ssh/sshd_config
@@ -44,6 +54,19 @@
     path: /etc/ssh/sshd_config
     regexp: '^#PubkeyAuthentication.*'
     line: 'PubkeyAuthentication yes'
+
+- name: Also don't allow PAM (password auth module?)
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: 'UsePAM.*'
+    line: 'UsePAM no'
+
+- name: Make sure if we are going to use root, we cannot ssh in using password
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '#PermitRootLogin.*'
+    line: 'PermitRootLogin prohibit-password'
+
     
 - name: Restart sshd
   service:

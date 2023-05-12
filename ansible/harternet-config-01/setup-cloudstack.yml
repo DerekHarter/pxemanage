@@ -17,4 +17,31 @@
         user: root
         state: present
         key: "{{ lookup('file', 'keys/manager-id_rsa.pub') }}"
-  
+
+# a bit of a kludge, but we can try and killall of the processes still hanging around for
+# the cloudstack user before we attempt to remove the user
+# ensure the cloudstack user has been removed from nodes
+- hosts: manager agent database
+  tasks:
+    - name: Kill all cloudstack processes so no error when we remove the user NOTE: this is likely to fail here as cloudstack acces has probably timed out now
+      command: killall -u cloudstack -w
+      ignore_errors: true
+      
+    - name: Remove temporary cloudstack users
+      user:
+        name: cloudstack
+        groups: cloudstack
+        state: absent
+        remove: yes
+
+# setup cloudmonkey for command line admin tasks
+- hosts: manager
+  tasks:
+    - name: Install cloudmonkey command line admin tool on the manager
+      get_url:
+        url: https://github.com/apache/cloudstack-cloudmonkey/releases/download/6.3.0/cmk.linux.x86-64
+        dest:  /usr/local/bin/cmk
+        mode: u+x
+      
+    - name: Call cloud monkey sync to load apis and enable for initial use
+      command: cmk sync
