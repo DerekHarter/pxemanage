@@ -18,84 +18,153 @@
         state: disabled
       
     # # create physical network for the cloud
-    # - name: Ensure physical network is created and present
-    #   ngine_io.cloudstack.cs_physical_network:
-    #     name: "{{ physical_network_name }}"
-    #     zone: "{{ zone_name }}"
-    #     vlan: "{{ vlan }}"
-    #     isolation_method: "{{ isolation_method }}"
+    - name: Ensure physical network is created and present
+      ngine_io.cloudstack.cs_physical_network:
+        name: "{{ physical_network_name }}"
+        zone: "{{ zone_name }}"
+        vlan: "{{ vlan }}"
+        isolation_method: "{{ isolation_method }}"
         
     # # add guest, management, public and storage trafic to the physical network
-    # - name: Add Management traffic types to physical network
-    #   ngine_io.cloudstack.cs_traffic_type:
-    #     physical_network: "{{ physical_network_name }}"
-    #     traffic_type: "Management"
-    #     zone: "{{ zone_name }}"
+    - name: Add Management traffic types to physical network
+      ngine_io.cloudstack.cs_traffic_type:
+        physical_network: "{{ physical_network_name }}"
+        traffic_type: "Management"
+        zone: "{{ zone_name }}"
 
-    # - name: Add Guest traffic types to physical network
-    #   ngine_io.cloudstack.cs_traffic_type:
-    #     physical_network: "{{ physical_network_name }}"
-    #     traffic_type: "Guest"
-    #     zone: "{{ zone_name }}"
+    - name: Add Guest traffic types to physical network
+      ngine_io.cloudstack.cs_traffic_type:
+        physical_network: "{{ physical_network_name }}"
+        traffic_type: "Guest"
+        zone: "{{ zone_name }}"
 
-    # - name: Add Public traffic types to physical network
-    #   ngine_io.cloudstack.cs_traffic_type:
-    #     physical_network: "{{ physical_network_name }}"
-    #     traffic_type: "Public"
-    #     zone: "{{ zone_name }}"
+    - name: Add Public traffic types to physical network
+      ngine_io.cloudstack.cs_traffic_type:
+        physical_network: "{{ physical_network_name }}"
+        traffic_type: "Public"
+        zone: "{{ zone_name }}"
         
-    # - name: Add Storage traffic types to physical network
-    #   ngine_io.cloudstack.cs_traffic_type:
-    #     physical_network: "{{ physical_network_name }}"
-    #     traffic_type: "Storage"
-    #     zone: "{{ zone_name }}"
-        
-
-    # - name: Can now ensure that the physical network is enabled
-    #   ngine_io.cloudstack.cs_physical_network:
-    #     name: "{{ physical_network_name }}"
-    #     zone: "{{ zone_name }}"
-    #     state: enabled
-        
-    # # create a guest network
-    # - name: Ensure our simple guest network is created and present
-    #   ngine_io.cloudstack.cs_network:
-    #     name: "{{ network_name }}"
-    #     zone: "{{ zone_name }}"
-    #     display_text: "{{ network_display_text }}"
-    #     network_offering: "{{ network_offering }}"
-    #     cidr: "{{ network_cidr }}"
-    #     dns1: "{{ dns1 }}"
-    #     dns2: "{{ dns2 }}"
-    #     gateway: "{{ network_gateway }}"
-    #     netmask: "{{ network_netmask }}"
+    - name: Add Storage traffic types to physical network
+      ngine_io.cloudstack.cs_traffic_type:
+        physical_network: "{{ physical_network_name }}"
+        traffic_type: "Storage"
+        zone: "{{ zone_name }}"
         
 
-    # # create a pod
-    # - name: Ensure our pod is created and present
-    #   ngine_io.cloudstack.cs_pod:
-    #     name: "{{ pod_name }}"
-    #     zone: "{{ zone_name }}"
-    #     gateway: "{{ pod_gateway }}"
-    #     netmask: "{{ pod_netmask }}"
-    #     start_ip: "{{ pod_start_ip }}"
-    #     end_ip: "{{ pod_end_ip }}"
+    - name: Can now ensure that the physical network is enabled
+      ngine_io.cloudstack.cs_physical_network:
+        name: "{{ physical_network_name }}"
+        zone: "{{ zone_name }}"
+        state: enabled
 
-    # # create a vlan ip range
-    # - name: create a VLAN IP range for our physical network
-    #   ngine_io.cloudstack.cs_vlan_ip_range:
-    #     zone: "{{ zone_name }}"
-    #     start_ip: "{{ vlan_start_ip }}"
-    #     end_ip: "{{ vlan_end_ip }}"
-    #     gateway: "{{ pod_gateway }}"
-    #     netmask: "{{ pod_netmask }}"
-    #     for_virtual_network: true
+    # creating network errors with message:
+    # create network name="HarterHouseNet" zoneid=928f2b7d-c7d3-4274-aa88-bbe9446706f4 displaytext="Harter Household Cloud Network" networkofferingid=f45728a6-cc6b-4a7e-a471-dbcaa17ff5e9 gateway=10.1.1.1 netmask=255.255.255.0 startip=10.1.1.2 endip=10.1.1.254
+    #   Error: (HTTP 530, error code 4390) Provider VirtualRouter is either not enabled or doesn't support service Dhcp in physical network id=200
 
-    # # create a cluster
-    # - name: Ensure basic cluster is created and present
-    #   ngine_io.cloudstack.cs_cluster:
-    #     zone: "{{ zone_name }}"
-    #     name: "{{ cluster_name }}"
-    #     hypervisor: "{{ hypervisor }}"
-    #     cluster_type: "{{ cluster_type }}"
+    # Need to enable the VirtualRouter network service provider, but before that need to enable
+    # its virtual router element
+    #   > configure virtualrouterelement id=f81a4bca-45c9-43cd-96ee-6ceb241dca42 enabled=true
+    # For the moment I don't see how to do this in the ansible module, so fall back to using
+    # cmk.  This of course requies cmk to be configured before here
+    - name: Determine the network service provider id of the VirtualRouter network service
+      shell: cmk list networkserviceproviders name=VirtualRouter | egrep '"id":' | awk '{print $2}' | tr -d ,
+      register: nsp_id
+
+    - name: Use the network service provider id to also get the virtual router element id we need
+      shell: cmk list virtualrouterelements nspid={{ nsp_id.stdout }} | egrep '"id":' | awk '{print $2}' | tr -d ,
+      register: vre_id
+
+    - name: Ensure that virtual router for the VirtualRouter service provider is enabled
+      shell: cmk configure virtualrouterelement id={{ vre_id.stdout }} enabled=true
+
+    # Need to enable the VirtualRouter network service provide before we can create guest nets
+    # > update networkserviceprovider id=c6745740-38e0-4790-b029-64585e5d9c90 state=Enabled
+    - name: Ensure that the VirtualRouter network service provider is enabled as well before we create networks
+      shell: cmk update networkserviceprovider id={{ nsp_id.stdout }} state=Enabled
+    
+    # create a guest network
+    - name: Ensure our simple guest network is created and present
+      ngine_io.cloudstack.cs_network:
+        name: "{{ network_name }}"
+        zone: "{{ zone_name }}"
+        display_text: "{{ network_display_text }}"
+        network_offering: "{{ network_offering }}"
+        gateway: "{{ network_gateway }}"
+        netmask: "{{ network_netmask }}"
+        start_ip: "10.1.1.2"
+        end_ip: "10.1.1.254"
         
+
+    # create a pod
+    - name: Ensure our pod is created and present
+      ngine_io.cloudstack.cs_pod:
+        name: "{{ pod_name }}"
+        zone: "{{ zone_name }}"
+        gateway: "{{ pod_gateway }}"
+        netmask: "{{ pod_netmask }}"
+        start_ip: "{{ pod_start_ip }}"
+        end_ip: "{{ pod_end_ip }}"
+
+    # create a vlan ip range
+    - name: create a VLAN IP range for our physical network
+      ngine_io.cloudstack.cs_vlan_ip_range:
+        zone: "{{ zone_name }}"
+        start_ip: "{{ vlan_start_ip }}"
+        end_ip: "{{ vlan_end_ip }}"
+        gateway: "{{ pod_gateway }}"
+        netmask: "{{ pod_netmask }}"
+        for_virtual_network: true
+
+    # add a cluster to th epod
+    - name: Ensure basic cluster is created and present
+      ngine_io.cloudstack.cs_cluster:
+        zone: "{{ zone_name }}"
+        pod: "{{ pod_name }}"
+        name: "{{ cluster_name }}"
+        hypervisor: "{{ hypervisor }}"
+        cluster_type: "{{ cluster_type }}"
+        
+
+    # TODO: these fail because we are not allowing password
+    #   login to root and this module seems to assume we are using password auth
+    #   we could create a root password and enable sshd access before, then disable
+    #   it after this
+    # add our hosts
+    - name: Add host {{ item }} from inventory to the zone/pod/cluster
+      ngine_io.cloudstack.cs_host:
+        name: "{{ item }}"
+        cluster: "{{ cluster_name }}"
+        zone: "{{ zone_name }}"
+        pod: "{{ pod_name }}"
+        hypervisor: "{{ hypervisor }}"
+        url: "http://{{ item }}"
+        username: root
+        password: cloudstack
+      with_items:
+        - "{{ groups['agent'] }}"
+
+    # add in primary and secondary storage pools for the cloud
+    - name: Ensure primary storage pool is available and present in cloud
+      ngine_io.cloudstack.cs_storage_pool:
+        name: "{{ primary_name }}"
+        zone: "{{ zone_name }}"
+        pod: "{{ pod_name }}"
+        cluster: "{{ cluster_name }}"
+        storage_url: "{{ primary_url }}"
+
+    # note again I don't see how to do this in the ansible cloudstack module, so fall back to cmk
+    # we will first need read the zone id
+    - name: Determine the zone id for our zone name
+      shell: cmk list zones name={{ zone_name }} | egrep '"id":' | awk '{print $2}' | tr -d ,
+      register: zone_id
+
+    # now we can add the secondary image storage to the zone
+    # the cmk add are not idempotent here,
+    - name: Add secondary storage to the cloud
+      shell: cmk add secondarystorage zoneid={{ zone_id.stdout }} scope={{ secondary_scope }} url={{ secondary_url}} providername={{ secondary_provider }} name={{ secondary_name }}
+      
+    # we have added all of the basic infrastructure, so we can now enable the zone
+    - name: Enable the zone to complete deployment
+      ngine_io.cloudstack.cs_zone:
+        name: "{{ zone_name }}"
+        state: enabled

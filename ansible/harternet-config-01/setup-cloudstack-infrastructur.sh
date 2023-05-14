@@ -84,7 +84,7 @@ cmk create network \
     dns2=${dns2} \
     gateway=${net1_gateway} \
     netmask=${net1_netmask}
-net_id=`cmk list networks name="${net1_name} | grep "\"id\":" | awk '{print $2}' | tr -d ,`
+net_id=`cmk list networks name="${net1_name}" | grep "\"id\":" | awk '{print $2}' | tr -d ,`
 echo "Created network name: ${net1_name} id: ${net_id} for zone: ${zone_id}"
 
 
