@@ -48,22 +48,24 @@
     dest: /etc/apparmor.d/disable/usr.lib.libvirt.virt-aa-helper
     state: link
 
-- name: Get status of libvirtd apparmor profile
-  stat: path=/etc/apparmor.d/usr.sbin.libvirtd
-  register: apparmor_libvirtd_profile
+#- name: Get status of libvirtd apparmor profile
+#  stat: path=/etc/apparmor.d/usr.sbin.libvirtd
+#  register: apparmor_libvirtd_profile
   
 - name: Run apparmor parser to pick up usr sbin libvirt disabled
   command: apparmor_parser -R /etc/apparmor.d/usr.sbin.libvirtd
-  when: apparmor_libvirtd_profile.stat.exists == False
-
-- name: Get status of libvirt helper apparmor profile
-  stat: path=/etc/apparmor.d/usr.lib.libvirt.virt-aa-helper
-  register: apparmor_libvirt_helper_profile
+  #when: apparmor_libvirtd_profile.stat.exists == False
+  when: deploy
+    
+#- name: Get status of libvirt helper apparmor profile
+#  stat: path=/etc/apparmor.d/usr.lib.libvirt.virt-aa-helper
+#  register: apparmor_libvirt_helper_profile
   
 - name: Run apparmor parser to pick up usr lib libvirt helper disabled
   command: apparmor_parser -R /etc/apparmor.d/usr.lib.libvirt.virt-aa-helper
-  when: apparmor_libvirt_helper_profile.stat.exists == False
-  
+  #when: apparmor_libvirt_helper_profile.stat.exists == False
+  when: deploy
+    
 # TODO: these masked services still seem to be running after masking, should they
 #   be stopped as well?
 - name: Mask libvirtd sockets so that we can listen in older style for tcp connections

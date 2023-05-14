@@ -35,3 +35,48 @@ secondary_nfs_path: /export/secondary
 #   can skip over tasks that should not be done a second time
 #   and are not ansible idemopotent
 deploy: true
+
+
+# cloudstack infrastructure
+# The following are used when configuring the default cloudstack infrastructure.
+# TODO: perhaps these should be in a separate file.
+
+# zone configuration
+zone_name: Zone1
+dns1: 8.8.8.8
+dns2: 8.8.4.4
+internal_dns1: 8.8.8.8
+internal_dns2: 8.8.4.4
+guest_cidr_address: "10.1.1.0/24"
+network_type: Advanced
+
+# physical network configuration
+physical_network_name: "Physical Network 1"
+vlan: "100-200"
+isolation_method: VLAN
+
+# guest network configuration
+network_name: "HarterHouseNet"
+network_display_text: "Harter Household Cloud Network"
+network_cidr: "10.1.1.0/24"
+network_gateway: "10.1.1.1"
+network_netmask: "255.255.255.0"
+network_offering: "DefaultIsolatedNetworkOfferingWithSourceNatService"
+
+# pod configuration
+pod_name: "Pod-Zone1"
+pod_gateway: "192.168.0.1"
+pod_netmask: "255.255.255.0"
+pod_start_ip: "192.168.0.201"
+pod_end_ip: "192.168.0.254"
+
+# vlan ip range? for physical network ip assignments of virtual network gateways?
+vlan_start_ip: "192.168.0.154"
+vlan_end_ip: "192.168.0.200"
+
+# cluster configuration
+cluster_name: "Cluster-Zone1"
+hypervisor: "KVM"
+cluster_type: "CloudManaged"
+
+
