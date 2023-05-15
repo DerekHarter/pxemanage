@@ -127,64 +127,6 @@
         state: restarted
         
 
-# setup cloudmonkey for command line admin tasks
-- hosts: manager
-  vars:
-    cmk_url: "https://github.com/apache/cloudstack-cloudmonkey/releases/download/6.3.0/cmk.linux.x86-64"
-    
-  tasks:
-    - name: Install cloudmonkey command line admin tool on the manager
-      get_url:
-        url: "{{ cmk_url }}"
-        dest:  /usr/local/bin/cmk
-        mode: u+x
-      
-    - name: Call cloud monkey sync to load apis and enable for initial use
-      command: cmk sync
-
-    # TODO: should we (re)configure the config file to use api keys and the https/ssl interface
-    #   it would be similar/same as we do next here to configure the ansible/cs tool for
-    #   https/ssl access
-
-# Generate api key and secret and setup the cloudstack.ini file so that both cloud monkey and the cs cloudstack
-# tool used by ansible work to access the api.
-# NOTE: the cs tool access won't work until the ssl/https api is up and correctly configured
-# NOTE: to test this file, do the following on the management host
-#       $ python3
-#       >>> from cs import CloudStack, read_config
-#       >>> cs = CloudStack(**read_config())
-#       >>> cs.listUsers()
-#   The file created here is working if this reads the config and succeeds to access the api
-- hosts: manager
-  vars:
-    endpoint_url: "https://cloud01.harter.priv:8443/client/api"
-    
-  tasks:
-    - name: Ensure that the cs package used by the ansible cloudstack management lib is present
-      apt:
-        name: cs
-        state: present
-
-    # TODO: do we need to first use cmk to generate the userkeys?  Or is there a key/secret
-    #   already present after initial setup?
-    - name: Lookup the default admin id to query their api keys
-      shell: cmk list users name=admin | egrep '"id":' | awk '{print $2}' | tr -d ,
-      register: user_id
-
-    - name: Lookup the default admin user api key
-      shell: cmk get userkeys id={{ user_id.stdout }} | egrep apikey | awk '{print $2}' | tr -d ,\"
-      register: apikey
-      
-    - name: Lookup the default admin user secret key
-      shell: cmk get userkeys id={{ user_id.stdout }} | egrep secretkey| awk '{print $2}' | tr -d ,\"
-      register: secretkey
-
-    - name: Generate cloudstack.ini file for the ansible cs cloudstack tool
-      template:
-        src: roles/manager/templates/cloudstack.ini
-        dest: /root/.cloudstack.ini
-
-
 # Gather the certificate and the pkc12 certificate keystore back to the management server.
 # These files are useful to import into browsers or other sources to setup CA authorization
 # and stop annoying browser warning when testing cloudstack access over https/ssl
@@ -219,4 +161,64 @@
         src: "{{ public_key }}"
         dest: "keys/cloudstack.pub"
         flat: true
+
+# setup cloudmonkey for command line admin tasks
+- hosts: manager
+  vars:
+    cmk_url: "https://github.com/apache/cloudstack-cloudmonkey/releases/download/6.3.0/cmk.linux.x86-64"
+    
+  tasks:
+    - name: Install cloudmonkey command line admin tool on the manager
+      get_url:
+        url: "{{ cmk_url }}"
+        dest:  /usr/local/bin/cmk
+        mode: u+x
       
+    - name: Call cloud monkey sync to load apis and enable for initial use
+      command: cmk sync
+
+    # TODO: should we (re)configure the config file to use api keys and the https/ssl interface
+    #   it would be similar/same as we do next here to configure the ansible/cs tool for
+    #   https/ssl access
+
+        
+# Generate api key and secret and setup the cloudstack.ini file so that both cloud monkey and the cs cloudstack
+# tool used by ansible work to access the api.
+# NOTE: the cs tool access won't work until the ssl/https api is up and correctly configured
+# NOTE: to test the cloudstack.ini file, do the following on the management host
+#       $ python3
+#       >>> from cs import CloudStack, read_config
+#       >>> cs = CloudStack(**read_config())
+#       >>> cs.listUsers()
+#   The file created here is working if this reads the config and succeeds to access the api
+- hosts: manager
+  vars:
+    endpoint_url: "https://cloud01.harter.priv:8443/client/api"
+    
+  tasks:
+    - name: Ensure that the cs package used by the ansible cloudstack management lib is present
+      apt:
+        name: cs
+        state: present
+
+    - name: Lookup the default admin id to query their api keys
+      shell: cmk list users name=admin | egrep '"id":' | awk '{print $2}' | tr -d ,
+      register: user_id
+
+    - name: Register/create a new set of api user keys for default admin user
+      shell: cmk register userkeys id={{ user_id.stdout }}
+            
+    - name: Lookup the default admin user api key
+      shell: cmk get userkeys id={{ user_id.stdout }} | egrep apikey | awk '{print $2}' | tr -d ,\"
+      register: apikey
+      
+    - name: Lookup the default admin user secret key
+      shell: cmk get userkeys id={{ user_id.stdout }} | egrep secretkey| awk '{print $2}' | tr -d ,\"
+      register: secretkey
+
+    - name: Generate cloudstack.ini file for the ansible cs cloudstack tool
+      template:
+        src: roles/manager/templates/cloudstack.ini
+        dest: /root/.cloudstack.ini
+
+
