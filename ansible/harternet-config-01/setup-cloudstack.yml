@@ -201,6 +201,11 @@
         name: cs
         state: present
 
+    - name: Ensure that python3 sshpubkey package installed for ansible cs management
+      apt:
+        name: python3-sshpubkeys
+        state: present
+        
     - name: Lookup the default admin id to query their api keys
       shell: cmk list users name=admin | egrep '"id":' | awk '{print $2}' | tr -d ,
       register: user_id
