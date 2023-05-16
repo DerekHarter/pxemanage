@@ -1,7 +1,7 @@
 # We configure a reverse proxy using HAProxy to act as frontend to other
 # html/https servers in our network.
 #
-# Setup and ides mostly cribbed from: https://www.linuxbabe.com/linux-server/run-apache-nginx-haproxy-on-same-server-debian-ubuntu-centos
+# Setup and ideas mostly cribbed from: https://www.linuxbabe.com/linux-server/run-apache-nginx-haproxy-on-same-server-debian-ubuntu-centos
 - hosts: manager
   vars:
     zone_name: "Zone1"
@@ -148,10 +148,20 @@
     #   them as vars here for a pretty flexible solution
     # TODO: actually need the private isolated network ip of the vm for the
     #   template here, need to get it in this script.
-    - name: Configure the nginx web server for reverse proxy operations
+    - name: Configure the nginx web server for reverse proxy operations for plex server
       template:
         src: roles/proxy/templates/plex.conf
         dest: /etc/nginx/conf.d/plex.conf
+
+    - name: Configure the nginx web server for reverse proxy operations for cloud server
+      template:
+        src: roles/proxy/templates/cloud.conf
+        dest: /etc/nginx/conf.d/cloud.conf
+
+    - name: Configure the nginx web server for reverse proxy operations for media server
+      template:
+        src: roles/proxy/templates/media.conf
+        dest: /etc/nginx/conf.d/media.conf
 
     # Ensure nginx reverse proxy service is enabled and starts on reboot
     - name: Ensure nginx reverse reverse proxy service is enabled and will start on server reboot
