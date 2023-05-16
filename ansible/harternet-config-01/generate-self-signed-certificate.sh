@@ -84,6 +84,8 @@ subjectAltName = @alt_names
 
 [ alt_names ]
 DNS.1 = ${domain}
+#DNS.2 = *.harter.priv
+#DNS.3 = *.consoleproxy.harter.priv
 
 EOF
 echo ""
@@ -102,7 +104,8 @@ subjectAltName = @alt_names
 
 [alt_names]
 DNS.1 = ${domain}
-
+#DNS.2 = *.harter.priv
+#DNS.3 = *.consoleproxy.harter.priv
 EOF
 echo ""
 
