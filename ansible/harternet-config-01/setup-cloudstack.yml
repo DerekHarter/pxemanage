@@ -34,60 +34,41 @@
         state: absent
         remove: yes
 
+
 # configure cloudstack manager server properties
 # setup ssl/https access on the management node that serves the management web UI
-# We are setting up a fake root certificate authority here (CA) and then
-# signing a certificate for our domain name cloud01.harter.priv
+#
+# We changed procedures a bit.  We expect that the root CA and server keys have been
+# generated on the ansible management host.  This play now copies the
+# needed keystore file (cloudstack.jks) and configures the cloudstack management https
+# server for ssl/https.
 # TODO: move these variables to global?  and especially move the password into the
 #   secrets file.
 - hosts: manager
   vars:
     key_dir: /etc/cloudstack/management
-    key: "{{ key_dir }}/cloudstack.key"
-    public_key: "{{ key_dir }}/cloudstack.pub"
-    request: "{{ key_dir }}/cloudstack.csr"
-    extensions: "{{ key_dir }}/cloudstack.ssl.config"
-    certificate: "{{ key_dir }}/cloudstack.crt"
-    pkcs12_file: "{{ key_dir }}/cloudstack.p12"
     keystore: "{{ key_dir }}/cloudstack.jks"
     keystore_pass: "Tbiwtts4U"
-    subject: "/C=US/ST=Texas/L=Commerce/O=Harter House/OU=Harter Cloud/CN=cloud01.harter.priv/emailAddress==admin@cloud01.harter.priv"
+    
   tasks:
 
-    # Step 1, generate a key, signing requirest and self sign a certificate for our testing
-    - name: Generate private key for a test server ssl certificate
-      command: openssl genrsa -des3 -passout pass:{{ keystore_pass }} -out {{ key }} 4096
+    - name: Copy the certificate keystore we will use to ssl/https authenticate this management server from the ansible manager host
+      copy:
+        src: "keys/cloudstack.jks"
+        dest: "{{ keystore }}"
 
-    - name: Generate certificate signing request (csr) file.  In future we could have this signed by a real CA or certbot
-      command: openssl req -new -key {{ key }} -passin pass:{{ keystore_pass }} -extensions v3_ca -batch -out {{ request }}  -utf8 -subj '{{ subject }}'
-
-    # NOTE: The subject alt name extension has to be set here to get the certificates to be
-    #   accepted. Also some sources say CA needs to be false to add the certificate to
-    #   a set of authorities (for example to firefox list of authorities), but others
-    #   seem to need this to be true (can't import the certificate into firefox if this is false?)
-    - name: Create a file of openssl extensions/constraints to sign the request with
-      template:
-        src: roles/manager/templates/cloudstack.ssl.config
-        dest: "{{ extensions }}"
-
-    - name: Generate signed certificate to be used by this cloudstack management host
-      command: openssl x509 -req -sha256 -days 3650 -in {{ request }} -passin pass:{{ keystore_pass }} -signkey {{ key }} -extfile {{ extensions }} -out {{ certificate }}
+    - name: Copy the root CA certificate used so we can add to management host list of authorities
+      copy:
+        src: "keys/HarterRootCA.crt"
+        dest: "/usr/local/share/ca-certificates/HarterRootCA.crt"
         
-    # Step 2, convert/combine the certificate and private key to pkcs12 format.
-    - name: Convert and combine our key and self signed certificate for importation
-      command: openssl pkcs12 -export -in {{ certificate }} -inkey {{ key }} -passin pass:{{ keystore_pass }} -name cloudstack -out {{ pkcs12_file }} -passout pass:{{ keystore_pass }}
-
-    # Step 3, import the key (from pkcs12 file) and the certificate into a keystore file so that
-    # cloudstack can use it
-    - name: Import key into a keystore file that we create
-      command: keytool -importkeystore -srckeystore {{ pkcs12_file }} -srcstoretype PKCS12 -srcstorepass {{ keystore_pass }} -destkeystore {{ keystore }} -deststorepass {{ keystore_pass }}
-
-    # maybe not necessary, got error when trying to import:
-    #   keytool error: java.lang.Exception: Certificate reply and certificate in keystore are identical
-    #- name: Import the self signed certificate as well into the keystore
-    #  command: keytool -importcert -trustcacerts -file {{ certificate }} -keystore {{ keystore }} -alias cloudstack -storepass {{ keystore_pass }}
-
-    # Step 4, update the server.config file to enable https/ssl using this keystore
+    # TODO: actually it may only be necessary to add the root CA we are using, not any others?
+    - name: Copy the server certificate as well to add to list of authorities on this host
+      copy:
+        src: "keys/cloudstack.crt"
+        dest: "/usr/local/share/ca-certificates/cloudstack.crt"
+        
+          
     - name: Ensure that https access enabled on management server
       lineinfile:
         path: /etc/cloudstack/management/server.properties
@@ -98,19 +79,13 @@
       lineinfile:
         path: /etc/cloudstack/management/server.properties
         regexp: '^https.keystore=.*'
-        line: 'https.keystore=/etc/cloudstack/management/cloudstack.jks'
+        line: 'https.keystore={{ keystore }}'
 
     - name: Ensure that keystore password is set in properties
       lineinfile:
         path: /etc/cloudstack/management/server.properties
         regexp: '^https.keystore.password=.*'
         line: 'https.keystore.password={{ keystore_pass }}'
-
-    # Step 5, copy the certificate into the local management server list of
-    #   authorized certificates.  We can do similar to copy the certificate file
-    # to other machines we want to give CA ssl access over http to this signed certificate
-    - name: Copy self signed certificate to the servers list of additional ca certificates 
-      command: cp {{ certificate }} /usr/local/share/ca-certificates
 
     - name: Update list of authorized ca certificates on the management server
       command: update-ca-certificates
@@ -125,42 +100,7 @@
       service:
         name: cloudstack-management
         state: restarted
-        
 
-# Gather the certificate and the pkc12 certificate keystore back to the management server.
-# These files are useful to import into browsers or other sources to setup CA authorization
-# and stop annoying browser warning when testing cloudstack access over https/ssl
-- hosts: manager
-  # TODO: these are now copied from up above in same file, these definitely need to go
-  #   into globals or combined elsewhere.
-  vars:
-    key_dir: /etc/cloudstack/management
-    key: "{{ key_dir }}/cloudstack.key"
-    public_key: "{{ key_dir }}/cloudstack.pub"
-    certificate: "{{ key_dir }}/cloudstack.crt"
-    pkcs12_file: "{{ key_dir }}/cloudstack.p12"
-    keystore_pass: "Tbiwtts4U"
-  tasks:
-    - name: Fetch the management https/ssl certificate to the ansible management host
-      fetch:
-        src: "{{ certificate }}"
-        dest: "keys/cloudstack.crt"
-        flat: true
-
-    - name: Fetch the management https/ssl pkcs12 keystore to the ansible management host
-      fetch:
-        src: "{{ pkcs12_file }}"
-        dest: "keys/cloudstack.p12"
-        flat: true
-
-    - name: Generate the public signing key used for our management UI certificates
-      command: openssl rsa -in {{ key }} -passin pass:{{ keystore_pass }} -out  {{ public_key }}
-
-    - name: Fetch the management https/ssl public signing key to the  ansible management host
-      fetch:
-        src: "{{ public_key }}"
-        dest: "keys/cloudstack.pub"
-        flat: true
 
 # setup cloudmonkey for command line admin tasks
 - hosts: manager

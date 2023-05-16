@@ -142,6 +142,28 @@
       apt:
         name: nginx
 
+    # copy any generated certificates and keys needed for reverse proxy
+    # configuration to the reverse proxy host
+    - name: Copy the media self signed certificate for nginx ssl listen
+      copy:
+        src: "keys/media.crt"
+        dest: "/etc/nginx/conf.d/media.crt"
+    
+    - name: Copy the media certificate private key for nginx ssl listen
+      copy:
+        src: "keys/media.key"
+        dest: "/etc/nginx/conf.d/media.key"
+
+    - name: Copy the cloud self signed certificate for nginx ssl listen
+      copy:
+        src: "keys/cloud.crt"
+        dest: "/etc/nginx/conf.d/cloud.crt"
+    
+    - name: Copy the cloud certificate private key for nginx ssl listen
+      copy:
+        src: "keys/cloud.key"
+        dest: "/etc/nginx/conf.d/cloud.key"
+        
     # TODO: for the moment this template just hardcodes in the ip address
     #   configurations.  Not sure if worth it to parameterize this file, we could
     #   though pull out the relevant ip addresses relatively simply and just have
