@@ -22,10 +22,10 @@ registration_done = False
 
 # script global settings, may need to put these into config
 # files later
-#registration_file = "/etc/dhcp/dhcpd.conf"
-registration_file = "./dhcpd.conf"
-#system_event_file = "/var/log/syslog"
-system_event_file = "./test-syslog"
+registration_file = "/etc/dhcp/dhcpd.conf"
+#registration_file = "./dhcpd.conf"
+system_event_file = "/var/log/syslog"
+#system_event_file = "./test-syslog"
 
 subnet = "192.168.0.0"
 netmask = "255.255.255.0"
@@ -48,7 +48,7 @@ option mask-supplier    false;
 dhcpd_service_name = "isc-dhcp-server"
 service_list = [dhcpd_service_name, "tftpd-hpa", "apache2"]
 
-pxelinux_config_dir = "./"
+pxelinux_config_dir = "/var/www/tftp/pxelinux.cfg"
 apache_server_ip = "192.168.0.9"
 iso_image_name = "ubuntu22/ubuntu-22.04.2-live-server-amd64.iso"
 tftpd_server_ip = "192.168.0.0"
@@ -57,9 +57,10 @@ tftpd_server_ip = "192.168.0.0"
 # to manage our host database for now
 registration_db = {}
 class status(Enum):
-    RUNNING = 1
+    REGISTERED = 1
     DHCPOFFER = 2
     INSTALLING = 3
+    RUNNING = 4
 
 
 class Host:
@@ -74,7 +75,7 @@ class Host:
         self.macaddress = macaddress
         self.ipaddress = ipaddress
         self.profile = profile
-        self.status = status.RUNNING
+        self.status = status.REGISTERED
 
     def __str__(self):
         host_str = f"""
@@ -99,6 +100,18 @@ Host: {self.hostname}
     }}
 """
         return host_block
+
+    def macaddress_file(self):
+        """pxeboot needs a macaddress in this format:
+                11:22:33:44:55:66
+        to correspond to a file name like this:
+             01-11-22-33-44-55-66
+        (for some reason pxeboot prepends 01 on these file
+        file names)
+        """
+        macaddress_file = self.macaddress.replace(':', '-')
+        macaddress_file = f"01-{macaddress_file}"
+        return macaddress_file
 
 
 def read_host_registration():
@@ -155,7 +168,8 @@ def read_host_registration():
     print("The list of registered hosts discovered")
     for hostname in registration_db:
         print(registration_db[hostname])
-
+    print("")
+    
 
 def follow_system_events_file():
     """From: https://medium.com/@aliasav/how-follow-a-file-in-python-tail-f-in-python-bca026a901cf
@@ -206,6 +220,19 @@ def lookup_host_by_mac(macaddress):
     return None
 
 
+def lookup_host_by_ipaddress(ipaddress):
+    """Search registration database to see if the given
+    ipaddress is already registered or not.
+    """
+    # return first hostname found registered with that macaddress
+    for hostname in registration_db:
+        if registration_db[hostname].ipaddress == ipaddress:
+            return hostname
+
+    # indicate failure by returning None
+    return None
+
+
 def update_registration_file():
     """Write out a new registration database configuration to them
     dhcpd.conf file that we are using to maintain our cloudstack
@@ -239,6 +266,11 @@ def update_registration_file():
     file.write("}\n")
     file.close()
 
+    # now use sudo root authentication to copy the updated
+    # dhcpd.conf / registration to correct location
+    command = f"sudo cp {new_registration_file} {registration_file}"
+    subprocess.run(command, shell=True)
+
 
 def create_bootconfig_file(hostname):
     """A new host has been registered for this cluster.  Create the
@@ -251,7 +283,8 @@ def create_bootconfig_file(hostname):
     """
     # lookup host in registration database
     host = registration_db[hostname]
-    bootconfig_file = f"{pxelinux_config_dir}/{host.macaddress}"
+    bootconfig_file = f"{pxelinux_config_dir}/{host.macaddress_file()}"
+    new_bootconfig_file = f"./{host.macaddress_file()}"
     
     print("======== Create pxeboot configuration file ========")
     print(f"    ----- creating boot configuration for mac: {host.macaddress}")
@@ -260,7 +293,7 @@ def create_bootconfig_file(hostname):
     print("")
     
     # open new bootconfig file
-    file = open(bootconfig_file, 'w')
+    file = open(new_bootconfig_file, 'w')
 
     # write the global settings preamble
     bootconfig_preamble = """
@@ -299,10 +332,15 @@ LABEL local
     file.write(menu_boot_local)
     file.close()
 
+    # use sudo root authentication to copy the new file to its correct
+    # location
+    command = f"sudo cp {new_bootconfig_file} {bootconfig_file}"
+    subprocess.run(command, shell=True)
+    
     # make a symbolic link to this file but using the host name, which
     # makes it much easier for humans to find the bootconfig
     bootconfig_link = f"{pxelinux_config_dir}/{host.hostname}"
-    command = f"sudo ln -s {bootconfig_file} {bootconfig_link}"
+    command = f"sudo ln -rs {bootconfig_file} {bootconfig_link}"
     subprocess.run(command, shell=True)
 
 
@@ -351,7 +389,55 @@ def register_host(macaddress):
         update_registration_file()
         restart_dhcpd_service()
 
+        # keep track of the state of this host
+        host.status = status.DHCPOFFER
 
+
+def set_host_local_boot(hostname):
+    """Configure the given hosts pxeboot config file to default to
+    a local disk boot on its next network boot.
+    """
+    # lookup host in registration database
+    host = registration_db[hostname]
+
+    print(f"    -------- setting host {host.hostname} to perform local boot on reboot")
+    print("")
+    
+    # determine boot configuration file name
+    bootconfig_file = f"{pxelinux_config_dir}/{host.macaddress_file()}"
+
+    # we will use a simple bash sed replace line infile, switching
+    # to sudo authority for the command
+    command = f"sudo sed -i 's/ONTIMEOUT.*/ONTIMEOUT local/g' {bootconfig_file}"
+    subprocess.run(command, shell=True)
+
+    
+def install_host(ipaddress):
+    """A host that was assigned the given ip address has begun an
+    autoinstall boot.  Update the bootconfig file for that host so
+    that when they complete and reboot, they don't begin an install
+    again in an endless loop.
+    """
+    # look up the host in our registered hosts
+    hostname = lookup_host_by_ipaddress(ipaddress)
+
+    if not hostname:
+        print(f"    WARNING: host at {ipaddress} appears to be boot autoinstalling but it is not registered")
+        return
+    
+    print("======== Host performing pxeboot autoinstall ========")
+    print(f"    -------- detected pxeboot autoinstall for host {hostname} by ip address {ipaddress}")
+    # get a handle on the host and update it
+    host = registration_db[hostname]
+    if host.status != status.DHCPOFFER:
+        print(f"    WARNING: host {host.hostname} was not in expected state when we detected it performing boot autoinstall")
+    host.status = status.INSTALLING
+
+    # the host is currently boot autoinstalling.  set pxe bootconfig menu
+    # to automatically boot to the local disk on reboot
+    set_host_local_boot(hostname)
+    
+    
 def monitor_host_registrations():
     """Begin monitoring syslog for DHCPDISCOVER requests.
     A node when netbooted will make a DHCPDISCOVER to try
@@ -398,7 +484,19 @@ def monitor_host_registrations():
             print("")
             print("    detected DHCPDISCOVER from macaddress: <%s>" % macaddress)
             register_host(macaddress)
-            
+
+        # determine if registerd host install has begun
+        ip_pattern = "\d+\.\d+\.\d+\.\d+"
+        pattern = re.compile(f"^.*RRQ\s+from\s+({ip_pattern})\s+filename\s+initrd.*$")
+        match = pattern.match(line)
+
+        # if an initrd file was requested, the host is doing an autoinstall
+        if match:
+            ipaddress = match.group(1)
+            print("")
+            print(f"    detected autoinstall in progress from ipaddress: <{ipaddress}>")
+            install_host(ipaddress)
+        
     print("    -------- finishing host registration")
 
 
@@ -408,12 +506,15 @@ def end_registration_handler(signum, frame):
     registration_done = True
 
 
-def start_services():
-    """Start the services needed for cluster host registration.
+def restart_services():
+    """(re)Start the services needed for cluster host registration.
     We usually need dhcpd, tftpd and apache2 services running.
     On the ansible management machine it is not normal to have these
     running continuously, only when we are registering or 
     reinstalling hosts.
+
+    We restart in case somehow they are already running, to
+    ensure that their config files are reloaded.
 
     NOTE: we use sudo root escalation here, so this requires
     that this script be run as root or as an sudo enabled user.
@@ -421,7 +522,7 @@ def start_services():
     print("======== Start registration services ========")
     for service_name in service_list:
         print("    -------- starting service %s" % (service_name))
-        command = "sudo systemctl start %s" % (service_name)
+        command = "sudo systemctl restart %s" % (service_name)
         subprocess.run(command, shell=True)
     print("")
 
@@ -434,6 +535,7 @@ def restart_dhcpd_service():
     command = "sudo systemctl restart %s" % (dhcpd_service_name)
     subprocess.run(command, shell=True)
     print("")
+
 
 def stop_services():
     """Stop the services needed for cluster host registration.
@@ -464,7 +566,7 @@ def main():
     # 2. ensure dhcpd and tftpd servers are up and running,
     #    normal state is to have them turned off unless we are
     #    registering or reinstalling machines
-    start_services()
+    restart_services()
 
     # 3. begin monitoring syslog for DHCPDISCOVER events, which may
     #    indicate a new network book of a machine we want to register
