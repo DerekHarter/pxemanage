@@ -1,0 +1,13 @@
+# /etc/default/tftpd-hpa
+#
+# We need both options here:
+#
+# --secure will make it so that all tftp request references happen as if the
+#    directory is the root directory of the file store
+#
+# -vvv is needed as it will cause verbose logging to syslog, and we need these
+#    syslog events to determine when servers are in process of installation
+TFTP_USERNAME="tftp"
+TFTP_DIRECTORY="/home/dash/repos/cloudstack/pxemanage/files/tftp"
+TFTP_ADDRESS=":69"
+TFTP_OPTIONS="--secure -vvv"

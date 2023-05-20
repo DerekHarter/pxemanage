@@ -48,10 +48,15 @@ option mask-supplier    false;
 dhcpd_service_name = "isc-dhcp-server"
 service_list = [dhcpd_service_name, "tftpd-hpa", "apache2"]
 
-pxelinux_config_dir = "/var/www/tftp/pxelinux.cfg"
+pxelinux_config_dir = "./files/tftp/pxelinux.cfg"
 apache_server_ip = "192.168.0.9"
 iso_image_name = "ubuntu22/ubuntu-22.04.2-live-server-amd64.iso"
 tftpd_server_ip = "192.168.0.0"
+
+ks_profile_dir = "./files/html/profiles"
+ks_config_dir = "./files/html/ks"
+ansible_manager_key = "../ansible/harternet-config-01/keys/ansiblemanagement.key.pub"
+
 
 # we will use a simple dictionary with hostname as key
 # to manage our host database for now
@@ -233,6 +238,124 @@ def lookup_host_by_ipaddress(ipaddress):
     return None
 
 
+def create_bootconfig_file(hostname):
+    """A new host has been registered for this cluster.  Create the
+    host pxelinux boot configuration file using the information 
+    gathered for this host.
+
+    TODO: we really should be using something like j2 templates
+    here and everywhere instead of cluttering up code with
+    multi line strings.
+    """
+    # lookup host in registration database
+    host = registration_db[hostname]
+    bootconfig_file = f"{pxelinux_config_dir}/{host.macaddress_file()}"
+    #new_bootconfig_file = f"./{host.macaddress_file()}"
+    
+    print("======== Create pxeboot configuration file ========")
+    print(f"    ----- creating boot configuration for mac: {host.macaddress}")
+    print(f"    -----                            hostname: {host.hostname}")
+    print(f"    -----                            filename: {bootconfig_file}")
+    print("")
+    
+    # open new bootconfig file
+    file = open(bootconfig_file, 'w')
+
+    # write the global settings preamble
+    bootconfig_preamble = """
+ONTIMEOUT install
+timeout 30
+prompt 1
+
+display boot.msg
+
+MENU TITLE PXE Menu
+
+"""
+    file.write(bootconfig_preamble)
+    
+    # write the install-server menu label
+    menu_install_server = """
+LABEL install
+  MENU LABEL ^Install Ubuntu 22.04 Live Server
+  kernel vmlinuz
+  initrd initrd
+"""
+    file.write(menu_install_server)
+
+    # create the autoinstall on boot information line
+    append = f"  append url=http://{apache_server_ip}/images/{iso_image_name} autoinstall ds=nocloud-net;s=http://{apache_server_ip}/ks/{host.hostname}/ cloud-config-url=/dev/null ip=dhcp fsck.mode=skip ---"
+    file.write(append)
+
+    # create the boot from local drive menu
+    menu_boot_local = """
+
+LABEL local
+  MENU LABEL ^Boot from local drive
+  LOCALBOOT 0
+
+"""
+    file.write(menu_boot_local)
+    file.close()
+
+    # use sudo root authentication to copy the new file to its correct
+    # location
+    #command = f"cp {new_bootconfig_file} {bootconfig_file}"
+    #subprocess.run(command, shell=True)
+    
+    # make a symbolic link to this file but using the host name, which
+    # makes it much easier for humans to find the bootconfig
+    bootconfig_link = f"{pxelinux_config_dir}/{host.hostname}"
+    command = f"ln -rs {bootconfig_file} {bootconfig_link}"
+    subprocess.run(command, shell=True)
+
+
+def create_host_kickstart_file(hostname):
+    """Create a host kickstart file from the profile registered for
+    this host.
+    """
+    # lookup host in registration database
+    host = registration_db[hostname]
+    ks_profile = f"{ks_profile_dir}/{host.profile}"
+    ks_config = f"{ks_config_dir}/{host.hostname}"
+    user_data_file = f"{ks_config}/user-data"
+    
+    print("======== Create kickstart files ========")
+    print(f"    ----- creating kickstart files for : {host.hostname}")
+    print(f"    -----                 using profile: {host.profile}")
+    print(f"    -----                  profile name: {ks_profile}")
+    print(f"    -----                kickstart name: {user_data_file}")
+    
+    # copy the configuration to the new kickstart registration
+    # we can't use links as we need to modify information in each
+    # separate ks configuration user-data file
+    command = f"cp -r {ks_profile} {ks_config}"
+    subprocess.run(command, shell=True)
+
+    # make the modifications to the new user_data file
+    # update hostname
+    command = f"sed -i 's/    hostname: fixmehostname.*/    hostname: {host.hostname}/g' {user_data_file}"
+    subprocess.run(command, shell=True)
+    
+    # update ip address
+    command = f"sed -i 's|        addresses: \[fixmeipaddress\].*|        addresses: [{host.ipaddress}/24]|g' {user_data_file}"
+    subprocess.run(command, shell=True)
+
+    # inject ansible management key into cloudstack user
+    key = open(ansible_manager_key).readlines()[0].strip()
+    key = f'\"{key}\"'
+    print(f"    ---- inserting ansible manager key: {key}")
+    print("")
+    command = f"sed -i 's/    authorized-keys: \[fixmekey\].*/    authorized-keys: [{key}]/g' {user_data_file}"
+    subprocess.run(command, shell=True)
+
+    # TODO: this is getting kludgy, as a result of trying to move
+    #    location of served files to own directory, need to have permissions
+    #    exactly correct.  This needs to be run after the sed updates?
+    command = f"sudo chown -R dash:www-data {ks_config}"
+    subprocess.run(command, shell=True)
+    
+    
 def update_registration_file():
     """Write out a new registration database configuration to them
     dhcpd.conf file that we are using to maintain our cloudstack
@@ -242,6 +365,7 @@ def update_registration_file():
     to make this routine simple.
     """
     print("======== Update dhcpd.conf registration file ========")
+    print("")
     new_registration_file = "./dhcpd.conf"
 
     # we will rewrite this whole file everytime we update it.
@@ -272,78 +396,6 @@ def update_registration_file():
     subprocess.run(command, shell=True)
 
 
-def create_bootconfig_file(hostname):
-    """A new host has been registered for this cluster.  Create the
-    host pxelinux boot configuration file using the information 
-    gathered for this host.
-
-    TODO: we really should be using something like j2 templates
-    here and everywhere instead of cluttering up code with
-    multi line strings.
-    """
-    # lookup host in registration database
-    host = registration_db[hostname]
-    bootconfig_file = f"{pxelinux_config_dir}/{host.macaddress_file()}"
-    new_bootconfig_file = f"./{host.macaddress_file()}"
-    
-    print("======== Create pxeboot configuration file ========")
-    print(f"    ----- creating boot configuration for mac: {host.macaddress}")
-    print(f"    -----                            hostname: {host.hostname}")
-    print(f"    -----                            filename: {bootconfig_file}")
-    print("")
-    
-    # open new bootconfig file
-    file = open(new_bootconfig_file, 'w')
-
-    # write the global settings preamble
-    bootconfig_preamble = """
-ONTIMEOUT install
-timeout 30
-prompt 1
-
-display boot.msg
-
-MENU TITLE PXE Menu
-
-"""
-    file.write(bootconfig_preamble)
-    
-    # write the install-server menu label
-    menu_install_server = """
-LABEL install
-  MENU LABEL ^Install Ubuntu 22.04 Live Server
-  kernel vmlinuz
-  initrd initrd
-"""
-    file.write(menu_install_server)
-
-    # create the autoinstall on boot information line
-    append = f"  append url=http://{apache_server_ip}/images/{iso_image_name} autoinstall ds=nocloud-net;s=http://{apache_server_ip}/ks/{host.profile}/ cloud-config-url=/dev/null ip=dhcp fsck.mode=skip ---"
-    file.write(append)
-
-    # create the boot from local drive menu
-    menu_boot_local = """
-
-LABEL local
-  MENU LABEL ^Boot from local drive
-  LOCALBOOT 0
-
-"""
-    file.write(menu_boot_local)
-    file.close()
-
-    # use sudo root authentication to copy the new file to its correct
-    # location
-    command = f"sudo cp {new_bootconfig_file} {bootconfig_file}"
-    subprocess.run(command, shell=True)
-    
-    # make a symbolic link to this file but using the host name, which
-    # makes it much easier for humans to find the bootconfig
-    bootconfig_link = f"{pxelinux_config_dir}/{host.hostname}"
-    command = f"sudo ln -rs {bootconfig_file} {bootconfig_link}"
-    subprocess.run(command, shell=True)
-
-
 def register_host(macaddress):
     """When a dhcpd offer is detected, we will attempt to register the
     detected host into our cluster.  The mac_address that was received
@@ -363,7 +415,7 @@ def register_host(macaddress):
         return
 
     # otherwise see if we should register this new host
-    answer = input("    new host detected macaddress <%s>? should we register this host (y/n): " %(macaddress))
+    answer = input("    new host detected macaddress <%s> should we register this host (y/n): " %(macaddress))
     yes_responses = ['y', 'Y', 'yes', 'Yes', 'YES']
     if answer in yes_responses:
         hostname =  input("    enter hostname: ")
@@ -382,7 +434,7 @@ def register_host(macaddress):
         # The hostname and ip address are the only things that need to change
         # in the user-data?  Maybe copy from the profile to ks/hostname/
         # then do search and replace on those properties
-        # create_user_data_file()
+        create_host_kickstart_file(hostname)
         
         # now update dhcpd server with new manged host configurations
         # and reload dhcpd service with new configuration
@@ -408,7 +460,7 @@ def set_host_local_boot(hostname):
 
     # we will use a simple bash sed replace line infile, switching
     # to sudo authority for the command
-    command = f"sudo sed -i 's/ONTIMEOUT.*/ONTIMEOUT local/g' {bootconfig_file}"
+    command = f"sed -i 's/ONTIMEOUT.*/ONTIMEOUT local/g' {bootconfig_file}"
     subprocess.run(command, shell=True)
 
     
@@ -494,7 +546,7 @@ def monitor_host_registrations():
         if match:
             ipaddress = match.group(1)
             print("")
-            print(f"    detected autoinstall in progress from ipaddress: <{ipaddress}>")
+            #print(f"    detected autoinstall in progress from ipaddress: <{ipaddress}>")
             install_host(ipaddress)
         
     print("    -------- finishing host registration")
