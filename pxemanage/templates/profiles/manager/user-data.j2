@@ -25,7 +25,7 @@ autoinstall:
   drivers:
     install: false
   identity:
-    hostname: fixmehostname
+    hostname: {{ hostname }}
     password: $6$WBTW0aBxfHm.f7b.$7T8pwCd5lR/OES4qLFYzqxj5UArdnBhrMfjWFA6pAaFs2bw4x4qsfzByAWC9Nmt3jE/8Qlo/b8PHB19ufW5.p0
     realname: Apache cloudstack ssh insertion user account
     username: cloudstack
@@ -36,12 +36,23 @@ autoinstall:
     toggle: null
     variant: ''
   locale: en_US.UTF-8
+  late-commands:
+    - |
+      cat > /etc/sudoers.d/cloudstack << EOF
+      cloudstack ALL=(ALL) NOPASSWD: ALL
+      EOF
+    - sed -i 's/GRUB_TIMEOUT=0/GRUB_TIMEOUT=1/g' /etc/default/grub
+    - update-grub
   network:
     ethernets:
       eno1:
         critical: true
         dhcp-identifier: mac
-        dhcp4: true
+        dhcp4: false
+        addresses: [{{ ipaddress }}/24]
+        routes:
+        - to: default
+          via: 192.168.0.1
         nameservers:
           addresses:
           - 192.168.0.1
@@ -52,7 +63,7 @@ autoinstall:
     search_drivers: false
   ssh:
     allow-pw: true
-    authorized-keys: [fixmekey]
+    authorized-keys: [{{ management_key }}]
     install-server: true
   storage:
     config:

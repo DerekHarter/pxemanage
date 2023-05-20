@@ -1,0 +1,26 @@
+allow bootp;
+allow booting;
+max-lease-time 1200;
+default-lease-time 900;
+log-facility local7;
+
+option ip-forwarding    false;
+option mask-supplier    false;
+
+subnet 192.168.0.0 netmask 255.255.255.0
+{
+
+    {% for host in hosts -%}
+    host {{ host }}
+    {
+        hardware ethernet {{ hosts[host].macaddress }};
+        fixed-address {{ hosts[host].ipaddress }};
+        # cloudstack profile {{ hosts[host].profile }};
+        option routers 192.168.0.1;
+        option domain-name-servers 192.168.0.1, 8.8.8.8, 8.8.4.4;
+        filename "pxelinux.0";
+    }
+    {% endfor %}
+    
+}
+

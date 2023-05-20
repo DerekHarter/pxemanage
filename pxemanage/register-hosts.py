@@ -9,12 +9,14 @@ This script needs to modify root configuration files and
 start and stop root services, so it needs to be run
 as root user or with root sudo privileges currently.
 """
+import jinja2
 import os
 import re
 import signal
 import subprocess
 import time
 from enum import Enum
+from jinja2 import Environment, FileSystemLoader
 
 
 # system globals
@@ -33,18 +35,6 @@ router_ip = "192.168.0.1"
 dns_servers = "192.168.0.1, 8.8.8.8, 8.8.4.4"
 pxefilename = "pxelinux.0"
 
-dhcp_conf_settings = \
-"""
-allow bootp;
-allow booting;
-max-lease-time 1200;
-default-lease-time 900;
-log-facility local7;
-
-option ip-forwarding    false;
-option mask-supplier    false;
-
-"""
 dhcpd_service_name = "isc-dhcp-server"
 service_list = [dhcpd_service_name, "tftpd-hpa", "apache2"]
 
@@ -53,10 +43,11 @@ apache_server_ip = "192.168.0.9"
 iso_image_name = "ubuntu22/ubuntu-22.04.2-live-server-amd64.iso"
 tftpd_server_ip = "192.168.0.0"
 
-ks_profile_dir = "./files/html/profiles"
 ks_config_dir = "./files/html/ks"
 ansible_manager_key = "../ansible/harternet-config-01/keys/ansiblemanagement.key.pub"
 
+# jinja2 templates
+j2 = Environment(loader=FileSystemLoader("templates/"))
 
 # we will use a simple dictionary with hostname as key
 # to manage our host database for now
@@ -68,10 +59,15 @@ class status(Enum):
     RUNNING = 4
 
 
-class Host:
+class Host(dict):
     """Really just a structure that keeps track of all
     information about registered hosts we are
     managing.
+
+    Actually this class is a dict so that we can
+    easily pass into j2 to render templates.  But
+    it can act like a struct because we override the
+    getattr method.
     """
     def __init__(self, hostname, macaddress="unknown",
                  ipaddress="unknown", profile="default",
@@ -80,7 +76,7 @@ class Host:
         self.macaddress = macaddress
         self.ipaddress = ipaddress
         self.profile = profile
-        self.status = status.REGISTERED
+        self.status = status
 
     def __str__(self):
         host_str = f"""
@@ -91,20 +87,6 @@ Host: {self.hostname}
       status    : {self.status}
 """
         return host_str
-
-    def host_block(self):
-        host_block = f"""
-    host {self.hostname}
-    {{
-        hardware ethernet {self.macaddress};
-        fixed-address {self.ipaddress};
-        # cloudstack profile {self.profile};
-        option routers {router_ip};
-        option domain-name-servers {dns_servers};
-        filename "{pxefilename}";
-    }}
-"""
-        return host_block
 
     def macaddress_file(self):
         """pxeboot needs a macaddress in this format:
@@ -118,6 +100,13 @@ Host: {self.hostname}
         macaddress_file = f"01-{macaddress_file}"
         return macaddress_file
 
+    def __getattr__(self, name):
+        """Overload member access (getting an attribute) so that we
+        can perform host.ipaddress and have it lookup the value for
+        the key for us.
+        """
+        return self.__getitem__(name)
+    
 
 def read_host_registration():
     """Parse the host registration file.  This file keeps track of
@@ -250,58 +239,21 @@ def create_bootconfig_file(hostname):
     # lookup host in registration database
     host = registration_db[hostname]
     bootconfig_file = f"{pxelinux_config_dir}/{host.macaddress_file()}"
-    #new_bootconfig_file = f"./{host.macaddress_file()}"
     
     print("======== Create pxeboot configuration file ========")
     print(f"    ----- creating boot configuration for mac: {host.macaddress}")
     print(f"    -----                            hostname: {host.hostname}")
     print(f"    -----                            filename: {bootconfig_file}")
     print("")
-    
-    # open new bootconfig file
-    file = open(bootconfig_file, 'w')
 
-    # write the global settings preamble
-    bootconfig_preamble = """
-ONTIMEOUT install
-timeout 30
-prompt 1
-
-display boot.msg
-
-MENU TITLE PXE Menu
-
-"""
-    file.write(bootconfig_preamble)
-    
-    # write the install-server menu label
-    menu_install_server = """
-LABEL install
-  MENU LABEL ^Install Ubuntu 22.04 Live Server
-  kernel vmlinuz
-  initrd initrd
-"""
-    file.write(menu_install_server)
-
-    # create the autoinstall on boot information line
-    append = f"  append url=http://{apache_server_ip}/images/{iso_image_name} autoinstall ds=nocloud-net;s=http://{apache_server_ip}/ks/{host.hostname}/ cloud-config-url=/dev/null ip=dhcp fsck.mode=skip ---"
-    file.write(append)
-
-    # create the boot from local drive menu
-    menu_boot_local = """
-
-LABEL local
-  MENU LABEL ^Boot from local drive
-  LOCALBOOT 0
-
-"""
-    file.write(menu_boot_local)
+    # get template and render
+    template = j2.get_template("pxeboot.cfg.j2")
+    content = template.render(hostname = hostname,
+                              apache_server_ip = apache_server_ip,
+                              iso_image_name = iso_image_name)
+    file = open(bootconfig_file, mode="w")
+    file.write(content)
     file.close()
-
-    # use sudo root authentication to copy the new file to its correct
-    # location
-    #command = f"cp {new_bootconfig_file} {bootconfig_file}"
-    #subprocess.run(command, shell=True)
     
     # make a symbolic link to this file but using the host name, which
     # makes it much easier for humans to find the bootconfig
@@ -316,38 +268,37 @@ def create_host_kickstart_file(hostname):
     """
     # lookup host in registration database
     host = registration_db[hostname]
-    ks_profile = f"{ks_profile_dir}/{host.profile}"
     ks_config = f"{ks_config_dir}/{host.hostname}"
-    user_data_file = f"{ks_config}/user-data"
     
     print("======== Create kickstart files ========")
     print(f"    ----- creating kickstart files for : {host.hostname}")
     print(f"    -----                 using profile: {host.profile}")
-    print(f"    -----                  profile name: {ks_profile}")
-    print(f"    -----                kickstart name: {user_data_file}")
-    
-    # copy the configuration to the new kickstart registration
-    # we can't use links as we need to modify information in each
-    # separate ks configuration user-data file
-    command = f"cp -r {ks_profile} {ks_config}"
+    print(f"    -----                kickstart name: {ks_config}")
+
+    # create new subdirectory in ks hierarchy to hold this hosts kickstart file
+    command = f"mkdir -p {ks_config}"
     subprocess.run(command, shell=True)
 
-    # make the modifications to the new user_data file
-    # update hostname
-    command = f"sed -i 's/    hostname: fixmehostname.*/    hostname: {host.hostname}/g' {user_data_file}"
-    subprocess.run(command, shell=True)
-    
-    # update ip address
-    command = f"sed -i 's|        addresses: \[fixmeipaddress\].*|        addresses: [{host.ipaddress}/24]|g' {user_data_file}"
-    subprocess.run(command, shell=True)
-
-    # inject ansible management key into cloudstack user
-    key = open(ansible_manager_key).readlines()[0].strip()
-    key = f'\"{key}\"'
-    print(f"    ---- inserting ansible manager key: {key}")
-    print("")
-    command = f"sed -i 's/    authorized-keys: \[fixmekey\].*/    authorized-keys: [{key}]/g' {user_data_file}"
-    subprocess.run(command, shell=True)
+    # get user-data template and render it contents
+    # TODO: we should probably render the gateway and name servers
+    #   into the user-data here as well.
+    management_key = open(ansible_manager_key).readlines()[0].strip()
+    management_key = f'"{management_key}"'
+    template = j2.get_template(f"profiles/{host.profile}/user-data.j2")
+    content = template.render(hostname = host.hostname,
+                              ipaddress = host.ipaddress,
+                              management_key = management_key)
+    file = open(f"{ks_config}/user-data", mode="w")
+    file.write(content)
+    file.close()
+        
+    # copy the meta-data file from profile, these currently don't
+    # have any templates to render, but we'll keep in just in case
+    template = j2.get_template(f"profiles/{host.profile}/meta-data.j2")
+    content = template.render()
+    file = open(f"{ks_config}/meta-data", mode="w")
+    file.write(content)
+    file.close()
 
     # TODO: this is getting kludgy, as a result of trying to move
     #    location of served files to own directory, need to have permissions
@@ -368,32 +319,22 @@ def update_registration_file():
     print("")
     new_registration_file = "./dhcpd.conf"
 
-    # we will rewrite this whole file everytime we update it.
-    # (re)open file for writing, destroying past configuration
-    file = open(new_registration_file, 'w')
-    
-    # first output the global dhcp configuration needed in file header
-    file.write(dhcp_conf_settings)
-
-    # create the subnet information we are monitoring hosts on
-    file.write("subnet %s netmask %s\n" % (subnet, netmask))
-    file.write("{\n")
-
-    # now iterate over the hostnames in order and output a host
-    # block for each one we have registered under our management
-    hosts = sorted(registration_db.keys())
-    for hostname in hosts:
-        host = registration_db[hostname]
-        file.write(host.host_block())
-        
-    # close the subnet block of the file
-    file.write("}\n")
+    # get dhcpd.conf template and render its contents
+    # TODO: should templatize the router and dns information
+    #   in this template as well.
+    template = j2.get_template(f"dhcpd.conf.j2")
+    content = template.render(hosts=registration_db,
+                              var1 = "hello var 1",
+                              var2 = "hello var 2",
+                              var3 = "hello var 3")
+    file = open(f"{new_registration_file}", mode="w")
+    file.write(content)
     file.close()
-
+    
     # now use sudo root authentication to copy the updated
     # dhcpd.conf / registration to correct location
-    command = f"sudo cp {new_registration_file} {registration_file}"
-    subprocess.run(command, shell=True)
+    #command = f"sudo cp {new_registration_file} {registration_file}"
+    #subprocess.run(command, shell=True)
 
 
 def register_host(macaddress):
@@ -410,11 +351,13 @@ def register_host(macaddress):
     # ignore already registered hosts
     if is_registered(macaddress):
         hostname = lookup_host_by_mac(macaddress)
-        print("    not registering macaddress: <%s> already registered as host: <%s>" %
-              (macaddress, hostname))
+        #print("    detected DHCPDISCOVER from macaddress: <%s>" % macaddress)
+        #print("    not registering macaddress: <%s> already registered as host: <%s>" %
+        #      (macaddress, hostname))
         return
 
     # otherwise see if we should register this new host
+    print("    detected DHCPDISCOVER from macaddress: <%s>" % macaddress)
     answer = input("    new host detected macaddress <%s> should we register this host (y/n): " %(macaddress))
     yes_responses = ['y', 'Y', 'yes', 'Yes', 'YES']
     if answer in yes_responses:
@@ -533,8 +476,6 @@ def monitor_host_registrations():
         # to see how we should register this machine
         if match:
             macaddress = match.group(1)
-            print("")
-            print("    detected DHCPDISCOVER from macaddress: <%s>" % macaddress)
             register_host(macaddress)
 
         # determine if registerd host install has begun
@@ -553,6 +494,9 @@ def monitor_host_registrations():
 
 
 def end_registration_handler(signum, frame):
+    """This method is registered as a signal handler for an interupt (ctrl-c)
+    signal.  We notify the main loop that the user want to end registration.
+    """
     print("    -------- user has ended host registration")
     global registration_done
     registration_done = True
@@ -634,7 +578,7 @@ def main():
     for hostname in registration_db:
         print(registration_db[hostname])
     
-    # X. registration finished, turn dhcp and tftp server back off
+    # 4. registration finished, turn dhcp and tftp server back off
     stop_services()
 
 if __name__ == "__main__":

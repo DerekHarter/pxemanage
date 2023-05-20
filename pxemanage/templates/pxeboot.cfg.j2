@@ -1,0 +1,19 @@
+ONTIMEOUT local
+timeout 20
+prompt 1
+
+display boot.msg
+
+MENU TITLE PXE Menu
+
+
+LABEL install
+  MENU LABEL ^Install Ubuntu 22.04 Live Server
+  kernel vmlinuz
+  initrd initrd
+  append url=http://{{ apache_server_ip }}/images/{{ iso_image_name }} autoinstall ds=nocloud-net;s=http://{{ apache_server_ip }}/ks/{{ hostname }}/ cloud-config-url=/dev/null ip=dhcp fsck.mode=skip ---
+
+LABEL local
+  MENU LABEL ^Boot from local drive
+  LOCALBOOT 0
+
