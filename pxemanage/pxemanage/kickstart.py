@@ -83,3 +83,17 @@ def create_kickstart_file(hostname):
     #    exactly correct.  This needs to be run after the sed updates?
     command = f"sudo chown -R dash:www-data {ks_config}"
     subprocess.run(command, shell=True)
+
+
+def delete_kickstart_file(hostname):
+    """Delete the kickstart files for the given host.
+    Parameters
+    ----------
+    hostname - We are given the name of the host whose
+      kickstart files should be removed for it.  
+    """   
+    # lookup host in registration database
+    host = pm.hosts[hostname]
+    ks_config_dir = f"{pm.settings['ks_config_dir']}/{host.hostname}"
+    command = f"rm -rf {ks_config_dir}"
+    subprocess.run(command, shell=True)    

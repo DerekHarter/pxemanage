@@ -24,6 +24,7 @@ from .kickstart import *
 from .register import *
 from .reinstall import *
 from .services import *
+from .unregister import *
 
 
 # jinja2 templates

@@ -54,6 +54,24 @@ def create_bootconfig_file(hostname):
     subprocess.run(command, shell=True)
 
 
+def delete_bootconfig_file(hostname):
+    """Delete the bootconfig files associated with the given host
+    from the pxelinux.cfg directory.
+
+    Parameters
+    ----------
+    hostname - The host whose bootconfig files should be deleted from the system.
+    """
+    host = pm.hosts[hostname]
+    bootconfig_file = f"{pm.settings['pxelinux_config_dir']}/{host.macaddress_file()}"
+    command = f"rm -f {bootconfig_file}"
+    subprocess.run(command, shell=True)
+
+    bootconfig_link = f"{pm.settings['pxelinux_config_dir']}/{host.hostname}"
+    command = f"rm -f {bootconfig_link}"
+    subprocess.run(command, shell=True)
+
+
 def set_host_local_boot(hostname):
     """Configure the given pm.hosts pxeboot config file to default to
     a local disk boot on its next network boot.
