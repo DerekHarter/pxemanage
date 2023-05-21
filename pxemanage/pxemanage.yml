@@ -1,0 +1,36 @@
+# root configuration files we need
+registration_file: "/etc/dhcp/dhcpd.conf"
+#registration_file: "./dhcpd.conf"
+system_event_file: "/var/log/syslog"
+#system_event_file: "./test-syslog"
+
+
+# pxeboot config settings
+pxelinux_config_dir: "./files/tftp/pxelinux.cfg"
+pxefilename: "pxelinux.0"
+apache_server_ip: "192.168.0.9"
+iso_image_name: "ubuntu22/ubuntu-22.04.2-live-server-amd64.iso"
+
+
+# kickstarter config file settings
+# values needed in config files, such as kickstarter and pxeboot files
+# TODO: check if/where all of these are being used
+ks_config_dir: "./files/html/ks"
+ansible_manager_key: "../ansible/harternet-config-01/keys/ansiblemanagement.key.pub"
+gateway_ip: "192.168.0.1"
+subnet: "192.168.0.0"
+netmask: "255.255.255.0"
+dns_servers:
+  - "192.168.0.1"
+  - "8.8.8.8"
+  - "8.8.4.4"
+
+
+# services we need to be able to stop, start and reload to
+# perform pxeboot management
+dhcpd_service_name: "isc-dhcp-server"
+service_list:
+  - "isc-dhcp-server"
+  - "tftpd-hpa"
+  - "apache2"
+

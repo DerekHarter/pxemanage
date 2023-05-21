@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 """This script is a command line tool that is used to register
 new cloudstack hosts.  This script manages dhcpd and tftpd
 resources to detect new dhcp requests, register the hosts
@@ -9,12 +9,12 @@ This script needs to modify root configuration files and
 start and stop root services, so it needs to be run
 as root user or with root sudo privileges currently.
 """
-import jinja2
 import os
 import re
 import signal
 import subprocess
 import time
+from config import settings
 from enum import Enum
 from jinja2 import Environment, FileSystemLoader
 
@@ -22,36 +22,14 @@ from jinja2 import Environment, FileSystemLoader
 # system globals
 registration_done = False
 
-# script global settings, may need to put these into config
-# files later
-registration_file = "/etc/dhcp/dhcpd.conf"
-#registration_file = "./dhcpd.conf"
-system_event_file = "/var/log/syslog"
-#system_event_file = "./test-syslog"
-
-subnet = "192.168.0.0"
-netmask = "255.255.255.0"
-router_ip = "192.168.0.1"
-dns_servers = "192.168.0.1, 8.8.8.8, 8.8.4.4"
-pxefilename = "pxelinux.0"
-
-dhcpd_service_name = "isc-dhcp-server"
-service_list = [dhcpd_service_name, "tftpd-hpa", "apache2"]
-
-pxelinux_config_dir = "./files/tftp/pxelinux.cfg"
-apache_server_ip = "192.168.0.9"
-iso_image_name = "ubuntu22/ubuntu-22.04.2-live-server-amd64.iso"
-tftpd_server_ip = "192.168.0.0"
-
-ks_config_dir = "./files/html/ks"
-ansible_manager_key = "../ansible/harternet-config-01/keys/ansiblemanagement.key.pub"
-
 # jinja2 templates
 j2 = Environment(loader=FileSystemLoader("templates/"))
 
 # we will use a simple dictionary with hostname as key
 # to manage our host database for now
-registration_db = {}
+hosts = {}
+
+
 class status(Enum):
     REGISTERED = 1
     DHCPOFFER = 2
@@ -120,7 +98,7 @@ def read_host_registration():
     yaml parser or equivalent here.
     """
     current_host = None
-    for line in open(registration_file).readlines():
+    for line in open(settings['registration_file']).readlines():
         # search for a host block, all options read
         # from subsequent lines pertain to this host until
         # we see the next host block
@@ -128,26 +106,26 @@ def read_host_registration():
         match = pattern.match(line)
         if match:
             hostname = match.group(1)
-            #print("Parsing host: <%s>" % (hostname))
+            #print(f"Parsing host: {hostname}")
             current_host = Host(hostname)
-            registration_db[hostname] = current_host
+            hosts[hostname] = current_host
 
         # search for hardware ethernet mac address
         mac_pattern = "..:..:..:..:..:.."
-        pattern = re.compile(r"^\s*hardware\s+ethernet\s+(%s);.*$" % (mac_pattern))
+        pattern = re.compile(f"^\s*hardware\s+ethernet\s+({mac_pattern});.*$")
         match = pattern.match(line)
         if match:
             macaddress = match.group(1)
-            #print("    matched mac address: <%s>" % (macaddress))
+            #print(f"    matched mac address: {macaddress}" %)
             current_host.macaddress = macaddress
 
         # search for static ip address assignment
         ip_pattern = "\d+\.\d+\.\d+\.\d+"
-        pattern = re.compile(r"^\s*fixed-address\s+(%s);.*$" % (ip_pattern))
+        pattern = re.compile(f"^\s*fixed-address\s+({ip_pattern});.*$")
         match = pattern.match(line)
         if match:
             ipaddress = match.group(1)
-            #print("    matched ip address: <%s>" % (ipaddress))
+            #print(f"    matched ip address: {ipaddress}")
             current_host.ipaddress = ipaddress
 
         # search for cloudstack profile assignment
@@ -155,15 +133,15 @@ def read_host_registration():
         match = pattern.match(line)
         if match:
             profile = match.group(1)
-            #print("    matched profile: <%s>" % (profile))
+            #print(f"    matched profile: {profile}")
             current_host.profile = profile
 
     print("======== Read Host Registration ========")
     print("The list of registered hosts discovered")
-    for hostname in registration_db:
-        print(registration_db[hostname])
+    for hostname in hosts:
+        print(hosts[hostname])
     print("")
-    
+
 
 def follow_system_events_file():
     """From: https://medium.com/@aliasav/how-follow-a-file-in-python-tail-f-in-python-bca026a901cf
@@ -171,7 +149,7 @@ def follow_system_events_file():
     lines as they are logged.
     """
     # open the systems events file (syslog)
-    systemfile = open(system_event_file)
+    systemfile = open(settings['system_event_file'])
     
     # seek the end of the file
     systemfile.seek(0, os.SEEK_END)
@@ -206,8 +184,8 @@ def lookup_host_by_mac(macaddress):
     macaddress is already registered or not.
     """
     # return first hostname found registered with that macaddress
-    for hostname in registration_db:
-        if registration_db[hostname].macaddress == macaddress:
+    for hostname in hosts:
+        if hosts[hostname].macaddress == macaddress:
             return hostname
 
     # indicate failure by returning None
@@ -219,8 +197,8 @@ def lookup_host_by_ipaddress(ipaddress):
     ipaddress is already registered or not.
     """
     # return first hostname found registered with that macaddress
-    for hostname in registration_db:
-        if registration_db[hostname].ipaddress == ipaddress:
+    for hostname in hosts:
+        if hosts[hostname].ipaddress == ipaddress:
             return hostname
 
     # indicate failure by returning None
@@ -237,8 +215,8 @@ def create_bootconfig_file(hostname):
     multi line strings.
     """
     # lookup host in registration database
-    host = registration_db[hostname]
-    bootconfig_file = f"{pxelinux_config_dir}/{host.macaddress_file()}"
+    host = hosts[hostname]
+    bootconfig_file = f"{settings['pxelinux_config_dir']}/{host.macaddress_file()}"
     
     print("======== Create pxeboot configuration file ========")
     print(f"    ----- creating boot configuration for mac: {host.macaddress}")
@@ -249,15 +227,15 @@ def create_bootconfig_file(hostname):
     # get template and render
     template = j2.get_template("pxeboot.cfg.j2")
     content = template.render(hostname = hostname,
-                              apache_server_ip = apache_server_ip,
-                              iso_image_name = iso_image_name)
+                              apache_server_ip = settings['apache_server_ip'],
+                              iso_image_name = settings['iso_image_name'])
     file = open(bootconfig_file, mode="w")
     file.write(content)
     file.close()
     
     # make a symbolic link to this file but using the host name, which
     # makes it much easier for humans to find the bootconfig
-    bootconfig_link = f"{pxelinux_config_dir}/{host.hostname}"
+    bootconfig_link = f"{settings['pxelinux_config_dir']}/{host.hostname}"
     command = f"ln -rs {bootconfig_file} {bootconfig_link}"
     subprocess.run(command, shell=True)
 
@@ -267,8 +245,8 @@ def create_host_kickstart_file(hostname):
     this host.
     """
     # lookup host in registration database
-    host = registration_db[hostname]
-    ks_config = f"{ks_config_dir}/{host.hostname}"
+    host = hosts[hostname]
+    ks_config = f"{settings['ks_config_dir']}/{host.hostname}"
     
     print("======== Create kickstart files ========")
     print(f"    ----- creating kickstart files for : {host.hostname}")
@@ -282,7 +260,7 @@ def create_host_kickstart_file(hostname):
     # get user-data template and render it contents
     # TODO: we should probably render the gateway and name servers
     #   into the user-data here as well.
-    management_key = open(ansible_manager_key).readlines()[0].strip()
+    management_key = open(settings['ansible_manager_key']).readlines()[0].strip()
     management_key = f'"{management_key}"'
     template = j2.get_template(f"profiles/{host.profile}/user-data.j2")
     content = template.render(hostname = host.hostname,
@@ -322,19 +300,16 @@ def update_registration_file():
     # get dhcpd.conf template and render its contents
     # TODO: should templatize the router and dns information
     #   in this template as well.
-    template = j2.get_template(f"dhcpd.conf.j2")
-    content = template.render(hosts=registration_db,
-                              var1 = "hello var 1",
-                              var2 = "hello var 2",
-                              var3 = "hello var 3")
+    template = j2.get_template("dhcpd.conf.j2")
+    content = template.render(hosts=hosts)
     file = open(f"{new_registration_file}", mode="w")
     file.write(content)
     file.close()
     
     # now use sudo root authentication to copy the updated
     # dhcpd.conf / registration to correct location
-    #command = f"sudo cp {new_registration_file} {registration_file}"
-    #subprocess.run(command, shell=True)
+    command = f"sudo cp {new_registration_file} {settings['registration_file']}"
+    subprocess.run(command, shell=True)
 
 
 def register_host(macaddress):
@@ -351,14 +326,13 @@ def register_host(macaddress):
     # ignore already registered hosts
     if is_registered(macaddress):
         hostname = lookup_host_by_mac(macaddress)
-        #print("    detected DHCPDISCOVER from macaddress: <%s>" % macaddress)
-        #print("    not registering macaddress: <%s> already registered as host: <%s>" %
-        #      (macaddress, hostname))
+        #print(f"    detected DHCPDISCOVER from macaddress: {macaddress}")
+        #print(f"    not registering macaddress: {macaddress} already registered as host: {hostname}")
         return
 
     # otherwise see if we should register this new host
-    print("    detected DHCPDISCOVER from macaddress: <%s>" % macaddress)
-    answer = input("    new host detected macaddress <%s> should we register this host (y/n): " %(macaddress))
+    print(f"    detected DHCPDISCOVER from macaddress: {macaddress}")
+    answer = input(f"    new host detected macaddress {macaddress} should we register this host (y/n): ")
     yes_responses = ['y', 'Y', 'yes', 'Yes', 'YES']
     if answer in yes_responses:
         hostname =  input("    enter hostname: ")
@@ -367,7 +341,7 @@ def register_host(macaddress):
         print("")
         
         host = Host(hostname, macaddress, ipaddress, profile, status.DHCPOFFER)
-        registration_db[hostname] = host
+        hosts[hostname] = host
 
         # create autoinstall boot configuration in anticipation of the
         # newly registered host performing an autoinstall boot
@@ -393,13 +367,13 @@ def set_host_local_boot(hostname):
     a local disk boot on its next network boot.
     """
     # lookup host in registration database
-    host = registration_db[hostname]
+    host = hosts[hostname]
 
     print(f"    -------- setting host {host.hostname} to perform local boot on reboot")
     print("")
     
     # determine boot configuration file name
-    bootconfig_file = f"{pxelinux_config_dir}/{host.macaddress_file()}"
+    bootconfig_file = f"{settings['pxelinux_config_dir']}/{host.macaddress_file()}"
 
     # we will use a simple bash sed replace line infile, switching
     # to sudo authority for the command
@@ -423,7 +397,7 @@ def install_host(ipaddress):
     print("======== Host performing pxeboot autoinstall ========")
     print(f"    -------- detected pxeboot autoinstall for host {hostname} by ip address {ipaddress}")
     # get a handle on the host and update it
-    host = registration_db[hostname]
+    host = hosts[hostname]
     if host.status != status.DHCPOFFER:
         print(f"    WARNING: host {host.hostname} was not in expected state when we detected it performing boot autoinstall")
     host.status = status.INSTALLING
@@ -469,7 +443,7 @@ def monitor_host_registrations():
 
         # determine if a DHCPDISCOVER was received
         mac_pattern = "..:..:..:..:..:.."        
-        pattern = re.compile(r"^.*DHCPDISCOVER\s+from\s+(%s).*$" % (mac_pattern))
+        pattern = re.compile(f"^.*DHCPDISCOVER\s+from\s+({mac_pattern}).*$")
         match = pattern.match(line)
         
         # if offer received, gather information from operator
@@ -516,9 +490,9 @@ def restart_services():
     that this script be run as root or as an sudo enabled user.
     """
     print("======== Start registration services ========")
-    for service_name in service_list:
-        print("    -------- starting service %s" % (service_name))
-        command = "sudo systemctl restart %s" % (service_name)
+    for service_name in settings['service_list']:
+        print(f"    -------- starting service {service_name}")
+        command = f"sudo systemctl restart {service_name}"
         subprocess.run(command, shell=True)
     print("")
 
@@ -527,8 +501,8 @@ def restart_dhcpd_service():
     """Retart the dhcpd service.  Ensure it is running on this machine.
     """
     print("======== Restart dhcpd service ========")
-    print("    -------- restarting service %s" % (dhcpd_service_name))
-    command = "sudo systemctl restart %s" % (dhcpd_service_name)
+    print(f"    -------- restarting service {settings['dhcpd_service_name']}")
+    command = f"sudo systemctl restart {settings['dhcpd_service_name']}"
     subprocess.run(command, shell=True)
     print("")
 
@@ -543,9 +517,9 @@ def stop_services():
     that this script be run as root or as an sudo enabled user.
     """
     print("======== Stop registration services ========")
-    for service_name in service_list:
-        print("    -------- stopping service %s" % (service_name))
-        command = "sudo systemctl stop %s" % (service_name)
+    for service_name in settings['service_list']:
+        print("    -------- stopping service {service_name}")
+        command = f"sudo systemctl stop {service_name}"
         subprocess.run(command, shell=True)
     print("")
 
@@ -555,7 +529,8 @@ def main():
     """
     # do we need any command line arguments, do command line
     # parsing here if we decide.
-
+    global registration_done
+    
     # 1. read in and determine database of currently registered hosts
     read_host_registration()
 
@@ -575,11 +550,12 @@ def main():
 
     print("======== Registration Finished ========")
     print("The full list of registered hosts")
-    for hostname in registration_db:
-        print(registration_db[hostname])
-    
+    for hostname in hosts:
+        print(hosts[hostname])
+
     # 4. registration finished, turn dhcp and tftp server back off
     stop_services()
 
+    
 if __name__ == "__main__":
     main()
