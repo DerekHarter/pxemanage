@@ -51,7 +51,8 @@ def create_kickstart_file(hostname):
     print(f"    ----- creating kickstart files for : {host.hostname}")
     print(f"    -----                 using profile: {host.profile}")
     print(f"    -----                kickstart name: {ks_config}")
-
+    print("")
+    
     # create new subdirectory in ks hierarchy to hold this hosts kickstart file
     command = f"mkdir -p {ks_config}"
     subprocess.run(command, shell=True)

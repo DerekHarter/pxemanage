@@ -22,6 +22,7 @@ from .config import settings
 from .db import *
 from .kickstart import *
 from .register import *
+from .reinstall import *
 from .services import *
 
 

@@ -78,4 +78,26 @@ def set_host_local_boot(hostname):
     command = f"sed -i 's/ONTIMEOUT.*/ONTIMEOUT local/g' {bootconfig_file}"
     subprocess.run(command, shell=True)
 
+
+def set_host_install_boot(hostname):
+    """Configure the given pm.hosts pxeboot config file to default to
+    a autoinstall disk boot on its next network boot.
+
+    Parameters
+    ----------
+    hostname - The name of the configured host whose bootconfig file
+      should be modified to perform a reinstall autoinstall  boot on the next
+      reboot.
+    """
+    # lookup host in registration database
+    host = pm.hosts[hostname]
+
+    print(f"    -------- setting host {host.hostname} to perform reinstall auto installation on reboot")
     
+    # determine boot configuration file name
+    bootconfig_file = f"{pm.settings['pxelinux_config_dir']}/{host.macaddress_file()}"
+
+    # we will use a simple bash sed replace line infile, switching
+    # to sudo authority for the command
+    command = f"sed -i 's/ONTIMEOUT.*/ONTIMEOUT install/g' {bootconfig_file}"
+    subprocess.run(command, shell=True)

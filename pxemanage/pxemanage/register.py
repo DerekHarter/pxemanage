@@ -62,7 +62,7 @@ def monitor_host_registrations():
     print("")
     print("    use ctrl-c to end host registration cleanly")
     print("")
-    while not True:
+    while True:
         # get next system event
         line = next(systemevent)
 
@@ -88,8 +88,11 @@ def monitor_host_registrations():
             print("")
             #print(f"    detected autoinstall in progress from ipaddress: <{ipaddress}>")
             pm.install_host(ipaddress)
-        
+
+    # actually cannot currently get here, there is no way to stop monitoring for
+    # registration until the user tells us that registration is done
     print("    -------- finishing host registration")
+    pm.stop_services()
 
 
 def follow_system_events_file():
@@ -201,48 +204,13 @@ def install_host(ipaddress):
         return
     
     print("======== Host performing pxeboot autoinstall ========")
-    print(f"    -------- detected pxeboot autoinstall for host {hostname} by ip address {ipaddress}")
+    print(f"    -------- detected pxeboot autoinstall for host {hostname} ip address {ipaddress}")
     # get a handle on the host and update it
     host = pm.hosts[hostname]
-    if host.status != pm.status.DHCPOFFER:
+    if not (host.status == pm.status.DHCPOFFER or host.status == pm.status.REBOOTING):
         print(f"    WARNING: host {host.hostname} was not in expected state when we detected it performing boot autoinstall")
-    host.status = status.INSTALLING
+    host.status = pm.status.INSTALLING
 
     # the host is currently boot autoinstalling.  set pxe bootconfig menu
     # to automatically boot to the local disk on reboot
     pm.set_host_local_boot(hostname)
-
-
-def end_registration_handler(signum, frame):
-    """This method is registered as a signal handler for an interupt (ctrl-c)
-    signal.  We notify the main loop that the user want to end registration.
-
-    Parameters
-    ----------
-    signum - the signal number of the generated interupt. If we register only for
-       for ctrl-c (SIGINT) signals, this should be 2 (we could/should check it?)
-    frame - current stack frame, not used here.
-    """
-    print("    -------- user has ended host registration")
-    # check if any machine still in dhcp offer state
-    for hostname in pm.hosts:
-        status = pm.hosts[hostname].status
-        if status == pm.status.DHCPOFFER or status == pm.status.REGISTERED:
-            print("    Warning, 1 or more hosts detected still in DHCPOFFER status.")
-            print("    This means machine was registered but not yet installed.")
-            print("    If you end registration now, the machines bootconfig may")
-            print("    still be set to reinstall on boot")
-            print(f"   host: {hostname} status: {status}")
-            yes_responses = ['y', 'Y', 'yes', 'Yes', 'YES']
-            answer = input("Do you really want to end registration now (y/n): ")
-            # if not a yes we can return and continue registering
-            if not answer in yes_responses:
-                return
-
-    # stop the registration
-    print("======== Registration Finished ========")
-    print("The full list of registered hosts")
-    for hostname in pm.hosts:
-        print(pm.hosts[hostname])
-
-    sys.exit(0)

@@ -35,7 +35,8 @@ class status(Enum):
     REGISTERED = 1
     DHCPOFFER = 2
     INSTALLING = 3
-    RUNNING = 4
+    REBOOTING = 4
+    RUNNING = 5
 
 
 class Host(dict):
