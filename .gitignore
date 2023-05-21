@@ -2,8 +2,19 @@
 *.key
 *.pub
 secrets.yml
+keys/*
 
 # ignore editor backup files
 \#*\#
 .\#*
 *.~*~
+
+# ignore pythony cruft
+__pycache__
+
+# ansiblemanage files to ignore
+initrd
+ldlinux.c32
+pxelinux.0
+vmlinuz
+pxelinux.cfg
