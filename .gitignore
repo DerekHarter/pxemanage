@@ -18,3 +18,5 @@ ldlinux.c32
 pxelinux.0
 vmlinuz
 pxelinux.cfg
+images
+**/ks/cloud*
