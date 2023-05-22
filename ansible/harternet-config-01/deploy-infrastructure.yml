@@ -1,3 +1,13 @@
+# Playbook: deploy infrastructure
+#
+# This playbook is more of an example at the moment of how to use the ansible cloudstack
+# cs module (and also in some cases cloudmonkey cmk command line tool) to provision
+# infrastructure in the running cloud.  It should be run after the initial
+# deploy cloudstack play has been successful in deploying the cloudstack hosts.
+#
+# The infrastructre created here is basically the same one described in the quick
+# start cloudstack guide.  We create basic zone, physical network, guest network,
+# cluster, then add the host compute nodes and primary and secondary storage.
 - hosts: manager
   
   vars_files:
@@ -57,13 +67,8 @@
         zone: "{{ zone_name }}"
         state: enabled
 
-    # creating network errors with message:
-    # create network name="HarterHouseNet" zoneid=928f2b7d-c7d3-4274-aa88-bbe9446706f4 displaytext="Harter Household Cloud Network" networkofferingid=f45728a6-cc6b-4a7e-a471-dbcaa17ff5e9 gateway=10.1.1.1 netmask=255.255.255.0 startip=10.1.1.2 endip=10.1.1.254
-    #   Error: (HTTP 530, error code 4390) Provider VirtualRouter is either not enabled or doesn't support service Dhcp in physical network id=200
-
     # Need to enable the VirtualRouter network service provider, but before that need to enable
-    # its virtual router element
-    #   > configure virtualrouterelement id=f81a4bca-45c9-43cd-96ee-6ceb241dca42 enabled=true
+    # its virtual router elemente
     # For the moment I don't see how to do this in the ansible module, so fall back to using
     # cmk.  This of course requies cmk to be configured before here
     - name: Determine the network service provider id of the VirtualRouter network service
@@ -125,6 +130,61 @@
         cluster_type: "{{ cluster_type }}"
         
 
+# temporarily reenable root password access to allow the add host
+# to succeed, api seems to only have username/password authentication
+# at the moment?
+#
+# TODO: is there a better way to do this? cloudstack in the UI has a way to
+# specify that it should use ssh key authentication, which we have set
+# up.  We should find out how to specify ssh key auth so we can
+# avoid all of the work to open up root password auth here.
+# This seems like a new feature added in 4.16, but I don't see how to
+# specify using ssh auth in the API call, only in the management GUI
+#
+# NOTE: this worked even though I think the password was invalid, it appears
+#   you need to encrypt the password in the password field when you set it here.
+#   so maybe the api is trying ssh key auth, and we can just specify any
+#   password and it works?  Need to test that.
+- hosts: agent
+  
+  tasks:
+    - name: Enable SSH password authentication
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^.*PasswordAuthentication.*'
+        line: 'PasswordAuthentication yes'
+
+    - name: Enable interactive password authentication
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^.*KbdInteractiveAuthentication.*'
+        line: 'KbdInteractiveAuthentication yes'
+
+    - name: Enable root password logins
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^.*PermitRootLogin.*'
+        line: 'PermitRootLogin yes'
+
+    - name: Enable the root user to temporarily use password
+      user:
+        name: root
+        password: "!"
+        password_lock: false
+
+    - name: Restart sshd daemon so that cloudstack and add hosts using root password auth
+      service:
+        name: sshd
+        state: restarted
+        
+# now add the hosts where the cloudstack API will use the root password auth to
+# perform its tack
+- hosts: manager
+  
+  vars_files:
+    - vars/globals.yml
+    
+  tasks:    
     # TODO: these fail because we are not allowing password
     #   login to root and this module seems to assume we are using password auth
     #   we could create a root password and enable sshd access before, then disable
@@ -143,6 +203,48 @@
       with_items:
         - "{{ groups['agent'] }}"
 
+
+# undo changes to ssh, make sure we again disable any passowrd
+# authentication and that we locak the root account password again.
+- hosts: agent
+  
+  tasks:
+    - name: Disable SSH password authentication
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^.*PasswordAuthentication.*'
+        line: 'PasswordAuthentication no'
+
+    - name: Disable interactive password authentication
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^.*KbdInteractiveAuthentication.*'
+        line: 'KbdInteractiveAuthentication no '
+
+    - name: Make sure if we are going to use root, we cannot ssh in using password
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: 'PermitRootLogin.*'
+        line: 'PermitRootLogin prohibit-password'
+
+    - name: Disable root user password by locking it
+      user:
+        name: root
+        password_lock: true
+
+    - name: Restart sshd
+      service:
+        name: sshd
+        state: restarted
+
+# finish up by configuring primary and secondary storage for this cloud
+- hosts: manager
+  
+  vars_files:
+    - vars/globals.yml
+
+  tasks:
+    
     # add in primary and secondary storage pools for the cloud
     - name: Ensure primary storage pool is available and present in cloud
       ngine_io.cloudstack.cs_storage_pool:
