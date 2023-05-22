@@ -38,11 +38,11 @@ autoinstall:
   locale: en_US.UTF-8
   late-commands:
     - |
-      cat > /etc/sudoers.d/cloudstack << EOF
+      curtin in-target --target=/target -- cat > /etc/sudoers.d/cloudstack << EOF
       cloudstack ALL=(ALL) NOPASSWD: ALL
       EOF
-    - sed -i 's/GRUB_TIMEOUT=0/GRUB_TIMEOUT=1/g' /etc/default/grub
-    # - update-grub # this returns error when run in cloud-inig
+    - curtin in-target --target=/target -- sed -i 's/GRUB_TIMEOUT=0/GRUB_TIMEOUT=1/g' /etc/default/grub
+    - curtin in-target --target=/target -- update-grub
   network:
     ethernets:
       eno1:

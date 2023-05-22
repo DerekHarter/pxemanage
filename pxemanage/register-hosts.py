@@ -13,7 +13,7 @@ run this script.
 """
 import argparse
 import signal
-import signal
+import sys
 # load pxemanage routines into local namespace
 from pxemanage import \
     load_host_registration, \

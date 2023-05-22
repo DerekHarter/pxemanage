@@ -1,5 +1,4 @@
-"""
-pxemanage module
+"""pxemanage module
 
 register submodule
 
@@ -7,24 +6,21 @@ Contents
 --------
 
 Functions relating to implementation of host registration
-(e.g. register-hosts script).  We monitor the system
-events file (syslog) for events that indicate the
-progress/status of hosts.  
+(e.g. register-hosts script).  We monitor the system events file
+(syslog) for events that indicate the progress/status of hosts.
 
-DHCPDISCOVER: indicates a potential new host for the 
-  cluster was started and is attempting a net boot.
-  We determine if we want to register this machine, and
-  if so we assign it its name, ip address and profile
-  in the cluster we are managing.
+DHCPDISCOVER: indicates a potential new host for the cluster was
+  started and is attempting a net boot.  We determine if we want to
+  register this machine, and if so we assign it its name, ip address
+  and profile in the cluster we are managing.
 
-tftp RRQ for initrd file: When a machine is performing 
-  a netboot autoinstall, it needs to load the 
-  pxelinux.0, initrd and vmlinuz files from the tftp 
-  server (among others).  When the initrd files is 
-  requested, it is about to begin its install
-  process in earnest.  We use this event as an 
-  indication that the machine is installing itself
-  currently.
+tftp RRQ for initrd file: When a machine is performing a netboot
+  autoinstall, it needs to load the pxelinux.0, initrd and vmlinuz
+  files from the tftp server (among others).  When the initrd files is
+  requested, it is about to begin its install process in earnest.  We
+  use this event as an indication that the machine is installing
+  itself currently.
+
 """
 import os
 import re
@@ -34,11 +30,10 @@ import pxemanage as pm
 
 
 def monitor_host_registrations():
-    """Begin monitoring syslog for DHCPDISCOVER requests.
-    A node when netbooted will make a DHCPDISCOVER to try
-    and be assigned its ip addanss.  If we see a discover
-    request, it may be from a node we are trying to register
-    to be managed by this cluster.
+    """Begin monitoring syslog for DHCPDISCOVER requests.  A node when
+    netbooted will make a DHCPDISCOVER to try and be assigned its ip
+    addanss.  If we see a discover request, it may be from a node we
+    are trying to register to be managed by this cluster.
 
     We will ask the user if they want to register.  If they
     do then we gather
@@ -53,6 +48,7 @@ def monitor_host_registrations():
        either prompt user when we discover an event needing input
        asynchronously, or allow the user to quit the monitoring
        once done.
+
     """
     print("======== Monotor Syslog for Host Registration Requests ========")
     systemevent = follow_system_events_file()
@@ -85,7 +81,6 @@ def monitor_host_registrations():
         # if an initrd file was requested, the host is doing an autoinstall
         if match:
             ipaddress = match.group(1)
-            print("")
             #print(f"    detected autoinstall in progress from ipaddress: <{ipaddress}>")
             pm.install_host(ipaddress)
 
@@ -139,7 +134,7 @@ def register_host(macaddress):
     machine and return.
 
     TODO: add command line options to allow for auto sequence registrations,
-    e.g. first host get number 01, name cloud01 and ip 192.168.0.0...
+    e.g. first host get number 01, name cloud01 and ip 192.168.0.1...
 
     Parameters
     ----------
@@ -198,13 +193,13 @@ def install_host(ipaddress):
     """
     # look up the host in our registered hosts
     hostname = pm.lookup_host_by_ipaddress(ipaddress)
-
     if not hostname:
         print(f"    WARNING: host at {ipaddress} appears to be boot autoinstalling but it is not registered")
         return
     
     print("======== Host performing pxeboot autoinstall ========")
     print(f"    -------- detected pxeboot autoinstall for host {hostname} ip address {ipaddress}")
+    
     # get a handle on the host and update it
     host = pm.hosts[hostname]
     if not (host.status == pm.status.DHCPOFFER or host.status == pm.status.REBOOTING):

@@ -1,8 +1,8 @@
 # root configuration files we need
-#registration_file: "/etc/dhcp/dhcpd.conf"
-registration_file: "./dhcpd.conf"
-#system_event_file: "/var/log/syslog"
-system_event_file: "./test-syslog"
+registration_file: "/etc/dhcp/dhcpd.conf"
+#registration_file: "./dhcpd.conf"
+system_event_file: "/var/log/syslog"
+#system_event_file: "./test-syslog"
 
 
 # pxeboot config settings

@@ -30,7 +30,7 @@ def configure_hosts_for_reinstall(hostnames):
     valid_hostnames - a list of hosts that were found to be in the 
        hosts database of managed systems is returned.
 
-    Also all valid hosts under managed will have their bootconfig file
+    Also all valid hosts under management will have their bootconfig file
     set to perform an install after this function finishes.
 
     """
@@ -51,6 +51,7 @@ def configure_hosts_for_reinstall(hostnames):
     
     # return list of valid hosts that are managed and we can proceed with
     return valid_hostnames
+
 
 def reboot_hosts(hostnames):
     """Given a list of host names, attempt to perform ssh reboot of each host.
@@ -76,34 +77,48 @@ def reboot_hosts(hostnames):
 
         # attempt ssh reboot of the host, send it a reboot command
         # not using password here currently, so this assumes ssh key access is working
-        #command = f"ssh {pm.settings['username']}@{host.ipaddress} 'sudo reboot'"
         key = pm.settings['identity']
         args = pm.settings['ssh_args']
         username = pm.settings['username']
         password = pm.settings['password']
-        command = f"ssh -i {key} {args} {username}@{host.ipaddress} 'sudo reboot'"
-        print(f"    -------- Successfully rebooted {hostname}")
-        host.status = pm.status.REBOOTING
-        # try:
-        #     print(f"    -------- running command <{command}>")
-        #     output = subprocess.run(command, shell=True, check=True, capture_output=True)
-        #     print(f"    -------- Error, something happened rebooting {hostname}")
-        #     print(f"    -------- command returned: <{output.stdout}>")
-        # except subprocess.CalledProcessError as e:
-        #     # it is normal to get return error code 255 on reboot because the
-        #     # ssh connection gets interrupted
-        #     if e.returncode == 255:
-        #         print(f"    -------- Successfully rebooted {hostname}")
-        #         host.status = pm.status.REBOOTING
-        #         pass
-        #     else:
-        #         print(f"    -------- Warning: host {hostname} could not be successfully rebooted")
-        #         print("    -------- you will need to restart or reboot by hand to proceed with install")
-        #         #print(f"    -------- return code: <{e.returncode}>")
-        #         #print(f"    -------- return stdout: <{e.stdout}>")
-        #         #print(f"    -------- return stderr: <{e.stderr}>")
+
+        # we first detect if machine has working ssh communication with
+        # the identity we are using
+        command = f"ssh -i {key} {args} {username}@{host.ipaddress} 'sudo hostname'"
+        try:
+            output = subprocess.run(command, shell=True, check=True, capture_output=True)
+            connected = True
+        except subprocess.CalledProcessError as e:
+            connected = False
+            
+        # if we were able to successfully connect, attempt the actual reboot
+        # it is normal for this command to fail with a 255 returncode because we
+        # will loose the connection
+        if connected:
+            command = f"ssh -i {key} {args} {username}@{host.ipaddress} 'sudo reboot'"
+            rebooted = False
+            try:
+                print(f"    -------- running command <{command}>")
+                output = subprocess.run(command, shell=True, check=True, capture_output=True)
+            except subprocess.CalledProcessError as e:
+                # it is normal to get return error code 255 on reboot because the
+                # ssh connection gets interrupted
+                if e.returncode == 255:
+                    rebooted = True
+
+        # report what happened
+        if rebooted:
+            print(f"    -------- Successfully rebooted {hostname}")
+            host.status = pm.status.REBOOTING
+        else:
+            if not connected:
+                print(f"    -------- Error, could not connect to {hostname}, is identity correct?")
+            print(f"    -------- Warning: host {hostname} could not be successfully rebooted")
+            print("    -------- you will need to restart or reboot by hand to proceed with install")
+            
     print("")
-        
+
+
 def monitor_host_reinstalls():
     """Begin monitoring system events (syslog) for tftp request
     events of initrd files.  These indicate that a pxeboot
@@ -119,7 +134,7 @@ def monitor_host_reinstalls():
     # iterate over the lines
     print("    -------- async monitor system events starting")
     print("")
-    print("    use ctrl-c to end host registration cleanly")
+    print("    use ctrl-c to end host reinstallations monitoring")
     print("")
     while not all_hosts_installed():
         # get next system event
@@ -138,8 +153,12 @@ def monitor_host_reinstalls():
             pm.install_host(ipaddress)
         
     print("    -------- finished host reinstallations, all hosts appear to have started reinstall")
+    print("    -------- You may stop the services we use for management once all files have downloaded to the hosts")
     print("")
-    pm.stop_services()
+    # TODO: whoops a timing bug/issue here.  When we detect last host has started
+    # install, it still may be some time before it has finished getting files from
+    # tftp, and especially from http.  For now we leave services running.
+    #pm.stop_services()
 
 
 def all_hosts_installed():

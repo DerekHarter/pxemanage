@@ -20,8 +20,14 @@ autoinstall:
         - riscv64
         uri: http://ports.ubuntu.com/ubuntu-ports
     preserve_sources_list: false
-  codecs:
-    install: false
+    primary:
+    - arches:
+      - amd64
+      - i386
+      uri: http://us.archive.ubuntu.com/ubuntu
+    - arches:
+      - default
+      uri: http://ports.ubuntu.com/ubuntu-ports
   drivers:
     install: false
   identity:
@@ -38,25 +44,26 @@ autoinstall:
   locale: en_US.UTF-8
   late-commands:
     - |
-      cat > /etc/sudoers.d/cloudstack << EOF
+      curtin in-target --target=/target -- cat > /etc/sudoers.d/cloudstack << EOF
       cloudstack ALL=(ALL) NOPASSWD: ALL
       EOF
-    - sed -i 's/GRUB_TIMEOUT=0/GRUB_TIMEOUT=1/g' /etc/default/grub
-    # - update-grub # this returns error when run in cloud-init
+    - curtin in-target --target=/target -- sed -i 's/GRUB_TIMEOUT=0/GRUB_TIMEOUT=1/g' /etc/default/grub
+    - curtin in-target --target=/target -- update-grub
   network:
     ethernets:
       eno1:
+        addresses:
+        - [{{ ipaddress }}/24]
         critical: true
         dhcp-identifier: mac
         dhcp4: false
-        addresses: [{{ ipaddress }}/24]
-        routes:
-        - to: default
-          via: 192.168.0.1
         nameservers:
           addresses:
           - 192.168.0.1
           - 8.8.8.8
+        routes:
+        - to: default
+          via: 192.168.0.1
     version: 2
   source:
     id: ubuntu-server
@@ -68,122 +75,59 @@ autoinstall:
   storage:
     config:
     - ptable: gpt
-      serial: ST3320413AS_S2A3869X
-      wwn: '0x5000c5004a05a67c'
-      path: /dev/sdb
-      preserve: true
-      name: ''
-      grub_device: true
-      type: disk
-      id: disk-sdb
-    - device: disk-sdb
-      size: 1048576
-      flag: bios_grub
-      number: 1
-      preserve: true
-      grub_device: false
-      offset: 1048576
-      partition_type: 21686148-6449-6e6f-744e-656564454649
-      path: /dev/sdb1
-      type: partition
-      id: partition-sdb1
-    - device: disk-sdb
-      size: 2147483648
-      wipe: superblock
-      flag: linux
-      number: 2
-      preserve: true
-      grub_device: false
-      offset: 2097152
-      partition_type: 0fc63daf-8483-4772-8e79-3d69d8477de4
-      path: /dev/sdb2
-      type: partition
-      id: partition-sdb2
-    - fstype: ext4
-      volume: partition-sdb2
-      preserve: false
-      type: format
-      id: format-1
-    - device: disk-sdb
-      size: 317921951744
-      flag: linux
-      number: 3
-      preserve: true
-      grub_device: false
-      offset: 2149580800
-      partition_type: 0fc63daf-8483-4772-8e79-3d69d8477de4
-      path: /dev/sdb3
-      type: partition
-      id: partition-sdb3
-    - ptable: gpt
       serial: ST3320413AS_S2A386QA
       wwn: '0x5000c5004a05a0e4'
       path: /dev/sda
-      preserve: true
+      wipe: superblock-recursive
+      preserve: false
       name: ''
-      grub_device: false
+      grub_device: true
       type: disk
       id: disk-sda
     - device: disk-sda
       size: 1048576
       flag: bios_grub
       number: 1
-      preserve: true
+      preserve: false
       grub_device: false
       offset: 1048576
-      partition_type: 21686148-6449-6e6f-744e-656564454649
-      path: /dev/sda1
       type: partition
-      id: partition-sda1
+      id: partition-0
     - device: disk-sda
-      size: 2147483648
-      flag: linux
+      size: 4294967296
+      wipe: superblock
       number: 2
-      preserve: true
+      preserve: false
       grub_device: false
       offset: 2097152
-      partition_type: 0fc63daf-8483-4772-8e79-3d69d8477de4
-      path: /dev/sda2
       type: partition
-      id: partition-sda2
-    - device: disk-sda
-      size: 317921951744
-      flag: linux
-      number: 3
-      preserve: true
-      grub_device: false
-      offset: 2149580800
-      partition_type: 0fc63daf-8483-4772-8e79-3d69d8477de4
-      path: /dev/sda3
-      type: partition
-      id: partition-sda3
-    - name: ubuntu-vg
-      devices:
-      - partition-sda3
-      - partition-sdb3
-      preserve: true
-      type: lvm_volgroup
-      id: lvm-volgroup-ubuntu-vg
-    - name: ubuntu-lv
-      volgroup: lvm-volgroup-ubuntu-vg
-      size: 635839709184B
-      wipe: superblock
-      preserve: true
-      path: /dev/ubuntu-vg/ubuntu-lv
-      type: lvm_partition
-      id: lvm-partition-ubuntu-lv
+      id: partition-1
     - fstype: ext4
-      volume: lvm-partition-ubuntu-lv
+      volume: partition-1
       preserve: false
       type: format
       id: format-0
+    - device: disk-sda
+      size: 315774468096
+      wipe: superblock
+      number: 3
+      preserve: false
+      grub_device: false
+      offset: 4297064448
+      type: partition
+      id: partition-2
+    - fstype: ext4
+      volume: partition-2
+      preserve: false
+      type: format
+      id: format-1
     - path: /
-      device: format-0
-      type: mount
-      id: mount-0
-    - path: /boot
       device: format-1
       type: mount
       id: mount-1
+    - path: /boot
+      device: format-0
+      type: mount
+      id: mount-0
   updates: security
   version: 1

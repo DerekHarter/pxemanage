@@ -57,7 +57,7 @@ def stop_services():
     """
     print("======== Stop registration services ========")
     for service_name in settings['service_list']:
-        print("    -------- stopping service {service_name}")
+        print(f"    -------- stopping service {service_name}")
         command = f"sudo systemctl stop {service_name}"
         subprocess.run(command, shell=True)
     print("")
