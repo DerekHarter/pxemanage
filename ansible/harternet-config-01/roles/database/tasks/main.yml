@@ -55,7 +55,7 @@
     host_all: true
 
 # TODO: actually, do we need remote access if we are going to install the database
-#   separate from the management node?  Or is that done by a different cloud user?
+#   on a different node from the management node?  
 - name: Remove remote root access from database
   community.mysql.mysql_query:
     login_password: "{{ mysql_root_password }}"

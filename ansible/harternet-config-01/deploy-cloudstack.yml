@@ -1,15 +1,3 @@
-# before ansible management can proceed smoothly using injected ssh keys, need
-# to get the ssh management keys into all hosts that will be used in the cloudstack
-- hosts: all
-  vars_files:
-    - vars/globals.yml
-  vars:
-    ansible_user: "{{ insertion_user }}"
-    ansible_ssh_pass: "{{ insertion_password }}"
-    ansible_become_pass: "{{ insertion_password }}"
-  roles:
-    - ansiblesshmanage
-    
 # roles and configurations common to all cloudstack nodes in this cloud
 - hosts: manager database agent
   vars_files:
@@ -43,3 +31,210 @@
     - vars/secrets.yml
   roles:
     - agent
+
+
+#----------------------------------------------
+# Basic deployment is finished, and in theory you should be able to access
+# the cloudstack management ui in the browser and start creating
+# infrastructure.  But we want to do some more advanced configuration next,
+# mainly setting up ssl/https certificates and other security, as well
+# as configuring automated tools like cloud monkey for use
+
+
+# gather the keys from all cloudstack management servers locally to this ansible management node
+# TODO: in future if want to have multipe HA managers, will need to modify to support
+#   downloading and injecting multiple cloudstack management keys
+- hosts: manager
+  tasks:
+    - name: Fetch the management key from cloudstack manager to a local file on ansible manager
+      fetch:
+        src: "/var/lib/cloudstack/management/.ssh/id_rsa.pub"
+        dest: "keys/manager-id_rsa.pub"
+        flat: true
+
+# now distribute keys to all cloudstack aganets
+- hosts: agent
+  tasks:
+    - name: Copy cloudstack management key from ansible manager buffer to the agent node
+      authorized_key:
+        user: root
+        state: present
+        key: "{{ lookup('file', 'keys/manager-id_rsa.pub') }}"
+
+# configure cloudstack manager server properties
+# setup ssl/https access on the management node that serves the management web UI
+#
+# We changed procedures a bit.  We expect that the root CA and server keys have been
+# generated on the ansible management host.  This play now copies the
+# needed keystore file (cloudstack.jks) and configures the cloudstack management https
+# server for ssl/https.
+# TODO: move these variables to global?  and especially move the password into the
+#   secrets file.
+- hosts: manager
+  vars:
+    key_dir: /etc/cloudstack/management
+    keystore: "{{ key_dir }}/cloudstack.jks"
+    keystore_pass: "Tbiwtts4U"
+    
+  tasks:
+
+    - name: Copy the certificate keystore we will use to ssl/https authenticate this management server from the ansible manager host
+      copy:
+        src: "keys/cloudstack.jks"
+        dest: "{{ keystore }}"
+
+    - name: Copy the root CA certificate used so we can add to management host list of authorities
+      copy:
+        src: "keys/HarterRootCA.crt"
+        dest: "/usr/local/share/ca-certificates/HarterRootCA.crt"
+        
+    - name: Copy the server certificate as well to add to list of authorities on this host
+      copy:
+        src: "keys/cloudstack.crt"
+        dest: "/usr/local/share/ca-certificates/cloudstack.crt"
+        
+          
+    - name: Ensure that https access enabled on management server
+      lineinfile:
+        path: /etc/cloudstack/management/server.properties
+        regexp: '^https.enable.*'
+        line: 'https.enable=true'
+
+    - name: Ensure that keystore file set in properties
+      lineinfile:
+        path: /etc/cloudstack/management/server.properties
+        regexp: '^https.keystore=.*'
+        line: 'https.keystore={{ keystore }}'
+
+    - name: Ensure that keystore password is set in properties
+      lineinfile:
+        path: /etc/cloudstack/management/server.properties
+        regexp: '^https.keystore.password=.*'
+        line: 'https.keystore.password={{ keystore_pass }}'
+
+    - name: Update list of authorized ca certificates on the management server
+      command: update-ca-certificates
+          
+    - name: Increase management UI session timeout for convenience
+      lineinfile:
+        path: /etc/cloudstack/management/server.properties
+        regexp: '^session.timeout=.*'
+        line: 'session.timeout=60'
+        
+    - name: Restart the cloudstack management service to pick up https/ssl enabled
+      service:
+        name: cloudstack-management
+        state: restarted
+
+
+# setup cloudmonkey for command line admin tasks
+- hosts: manager
+  vars:
+    cmk_url: "https://github.com/apache/cloudstack-cloudmonkey/releases/download/6.3.0/cmk.linux.x86-64"
+    
+  tasks:
+    - name: Install cloudmonkey command line admin tool on the manager
+      get_url:
+        url: "{{ cmk_url }}"
+        dest:  /usr/local/bin/cmk
+        mode: u+x
+      
+    - name: Call cloud monkey sync to load apis and enable for initial use
+      command: cmk sync
+
+    # TODO: should we (re)configure the config file to use api keys and the https/ssl interface
+    #   it would be similar/same as we do next here to configure the ansible/cs tool for
+    #   https/ssl access
+
+        
+# Generate api key and secret and setup the cloudstack.ini file so that both cloud monkey and the cs cloudstack
+# tool used by ansible work to access the api.
+# NOTE: the cs tool access won't work until the ssl/https api is up and correctly configured
+# NOTE: to test the cloudstack.ini file, do the following on the management host
+#       $ python3
+#       >>> from cs import CloudStack, read_config
+#       >>> cs = CloudStack(**read_config())
+#       >>> cs.listUsers()
+#   The file created here is working if this reads the config and succeeds to access the api
+- hosts: manager
+  vars:
+    endpoint_url: "https://cloud01.harter.priv:8443/client/api"
+    
+  tasks:
+    - name: Ensure that the cs package used by the ansible cloudstack management lib is present
+      apt:
+        name: cs
+        state: present
+
+    - name: Ensure that python3 sshpubkey package installed for ansible cs management
+      apt:
+        name: python3-sshpubkeys
+        state: present
+        
+    - name: Lookup the default admin id to query their api keys
+      shell: cmk list users name=admin | egrep '"id":' | awk '{print $2}' | tr -d ,
+      register: user_id
+
+    - name: Register/create a new set of api user keys for default admin user
+      shell: cmk register userkeys id={{ user_id.stdout }}
+            
+    - name: Lookup the default admin user api key
+      shell: cmk get userkeys id={{ user_id.stdout }} | egrep apikey | awk '{print $2}' | tr -d ,\"
+      register: apikey
+      
+    - name: Lookup the default admin user secret key
+      shell: cmk get userkeys id={{ user_id.stdout }} | egrep secretkey| awk '{print $2}' | tr -d ,\"
+      register: secretkey
+
+    - name: Generate cloudstack.ini file for the ansible cs cloudstack tool
+      template:
+        src: roles/manager/templates/cloudstack.ini
+        dest: /root/.cloudstack.ini
+
+# TODO we have one final task.  If the ssl certificates are correctly setup, we should
+# be able to use certificate authentication for the console proxy and storage vms.
+# this requires adding the root certificate and cloudstack certificate and key to
+# cloudstack, and setting two parameters to true.
+- hosts: manager
+  vars:
+    cert_dir: /usr/local/share/ca-certificates
+    
+  tasks:
+
+    # we temporarily copy our server key, the root and server certificate should
+    # have already been uploaded to the ca-certificates directory when setting up
+    # cloudstack manager server properties
+    - name: Temporarily copy the server key so that we can upload to cloudstack management API
+      copy:
+        src: "keys/cloudstack.pkcs8.key"
+        dest: "{{ cert_dir }}/cloudstack.pkcs8.key"
+
+    - name: Upload root CA certificate for our cloud to cloudstack API
+      shell: cmk upload customcertificate domainsuffix=cloud01.harter.priv id=1 name=root certificate=@{{ cert_dir }}/HarterRootCA.crt
+
+    - name: Upload the server certificate and key file to cloudstack API
+      shell: cmk upload customcertificate domainsuffix=cloud01.harter.priv id=2 privatekey=@{{ cert_dir }}/cloudstack.pkcs8.key certificate=@{{ cert_dir }}/cloudstack.crt
+
+    - name: Remove the server key is is no longer needed on server after uploading to cloudstack API
+      file:
+        state: absent
+        path: "{{ cert_dir }}/cloudstack.pkcs8.key"
+
+    - name: Set cloudstack setting consoleproxy.sslEnabled to true to use new certs for console proxy sessions
+      shell: cmk update configuration name="consoleproxy.sslEnabled" value="true"
+
+    - name: Set ssl cert domain secstorage.ssl.cert.comain for secondary storage SSL usage
+      shell: cmk update configuration name="consoleproxy.url.domain" value="*.harter.priv"
+      
+    - name: Set cloudstack setting secstorage.encrpyt.copy to true to use new certs for secondary storage communication
+      shell: cmk update configuration name="secstorage.encrypt.copy" value="true"
+      
+    - name: Set ssl cert domain secstorage.ssl.cert.comain for secondary storage SSL usage
+      shell: cmk update configuration name="secstorage.ssl.cert.domain" value="*.harter.priv"
+      
+    - name: Restart the cloudstack management service to pick up https/ssl enabled
+      service:
+        name: cloudstack-management
+        state: restarted
+
+

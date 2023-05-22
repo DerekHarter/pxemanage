@@ -2,7 +2,6 @@
 # we copy in a hosts file, but may want to set up DNS instead in future
 - name: Setup common static /etc/hosts file for call cloud nodes
   template: src=hosts.j2 dest=/etc/hosts
-  
 
 - name: Install bridge-utils and other networking tools so can set up networking bridges
   apt:

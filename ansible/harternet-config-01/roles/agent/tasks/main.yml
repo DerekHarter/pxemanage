@@ -104,3 +104,6 @@
     name: cloudstack-agent
     state: restarted
     enabled: true
+
+# TODO: might want to add a test to ensure kvm is actually successfully
+#   installed, had some mysterious failurs when the kvm module went missing

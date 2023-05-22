@@ -10,23 +10,6 @@
     upgrade: dist
     force_apt_get: yes
 
-# basic security, remove temporary user, tighten up sshd access to this node
-# TODO: This is no longer working because before this we login withthe cloudstack
-#   user to inject our ssh keys.  Apparently there are still user processes hanging
-#   around.  Need to force them to be cleaned up, or maybe we could move this to
-#   setup, though it really belongs here.
-- name: Kill all cloudstack processes so we don't error when we remove the user
-  command: killall -u cloudstack -w
-  ignore_errors: true
-
-- name: Remove temporary cloudstack users
-  user:
-    name: cloudstack
-    groups: cloudstack
-    state: absent
-    remove: yes
-  ignore_errors: true
-    
 - name: Ensure ansible management server is only allowed host
   lineinfile:
     path: /etc/hosts.allow
@@ -43,35 +26,56 @@
 
 
 # disable passwords and password auth and only allow ssh auth
-- name: Disable SSH password authentication
-  lineinfile:
-    path: /etc/ssh/sshd_config
-    regexp: '^#PasswordAuthentication.*'
-    line: 'PasswordAuthentication no'
-
 - name: Enable only ssh public key authentication to host
   lineinfile:
     path: /etc/ssh/sshd_config
     regexp: '^#PubkeyAuthentication.*'
     line: 'PubkeyAuthentication yes'
 
-- name: Also don't allow PAM (password auth module?)
+# our goal is to disable any keyboard password authentication and lock
+# passwords for the cloudstack and root accounts.  We need to leave
+# PAM on, but make sure PasswordAuthentication and
+# KbdInteractiveAuthentication are off to achieve this
+- name: We actually need PAM still enabled
   lineinfile:
     path: /etc/ssh/sshd_config
     regexp: 'UsePAM.*'
-    line: 'UsePAM no'
+    line: 'UsePAM yes'
 
+- name: Disable SSH password authentication
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#PasswordAuthentication.*'
+    line: 'PasswordAuthentication no'
+
+- name: Disable keyboard interactive password authentication
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^.*KbdInteractiveAuthentication.*'
+    line: 'KbdInteractiveAuthentication no'
+
+    
 - name: Make sure if we are going to use root, we cannot ssh in using password
   lineinfile:
     path: /etc/ssh/sshd_config
     regexp: '#PermitRootLogin.*'
     line: 'PermitRootLogin prohibit-password'
 
+- name: Disable cloudstack password, so only ssh authentication can work
+  user:
+    name: cloudstack
+    password_lock: true
+
+- name: Disable root password, so only ssh authentication can work
+  user:
+    name: root
+    password_lock: true
     
 - name: Restart sshd
   service:
     name: sshd
     state: restarted
+
 
 # setup server time sync and time zone
 - name: Set timezone to America/Chicago
