@@ -1,1 +1,0 @@
-deb [arch=amd64 signed-by={{ plexserver_key }}] {{ plexserver_pkg_url }} public main
