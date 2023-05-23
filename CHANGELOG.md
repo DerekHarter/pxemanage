@@ -51,7 +51,7 @@ are used by netboot autoinstall processes to serve the image files and
 install media.  tftp has initial boot configuration, while http serves
 iso install image and has cloud-init kickstarter files.
 
-## [0.4] - 2023-05-22 Release 0.4 Refactor deployment scripts
+## [0.4] - 2023-05-22 Release 0.4 ssh key/cert/https/ssl authentication setup
 
 ### Added
 

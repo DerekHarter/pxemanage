@@ -1,20 +1,31 @@
 # This ansible playbook attempts to create and configure a working plex server on
 # an ubuntu 22.04 Jammy server
+#
+#
+#
+#
+#
 - hosts: manager
+  
   vars:
+    server_name: plex-alternate
+    service_offering: "Medium Instance"
+    root_disk_size: 8
+    vm_template_name: "Ubuntu Server 22.04 LTS (Jammy Jellyfish) x86_64"
     zone_name: "Zone1"
     network_name: "HarterHouseNet"
-    plex_template_name: "Ubuntu Server 22.04 LTS (Jammy Jellyfish) x86_64"
+    manager_identity: ansible-management-key
+    manager_key: 'keys/ansiblemanagement.key.pub'
     
   tasks:
 
     # Ensure that the needed server template is registerd and downloaded
     - name: Ensure that the needed server template image is registered and downloaded
       ngine_io.cloudstack.cs_template:
-        name: "{{ plex_template_name }}"
+        name: "{{ vm_template_name }}"
         #name: "Ubuntu Server 22.04 LTS (Jammy Jellyfish) x86_64"
         url: "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64-disk-kvm.img"
-        display_text: "{{ plex_template_name }}"
+        display_text: "{{ vm_template_name }}"
         cross_zones: true
         hypervisor: "KVM"
         format: "RAW"
@@ -29,11 +40,11 @@
     # Register our ansible management key to use to manage the plex server
     - name: Register our ansible management key to manage the plex server
       ngine_io.cloudstack.cs_sshkeypair:
-        name: plex
-        public_key: "{{ lookup('file', 'keys/ansiblemanagement.key.pub') }}"
+        name: "{{ manager_identity }}"
+        public_key: "{{ lookup('file', '{{ manager_key }}') }}"
 
-        
-    # Acquire a public IP address in the isolated network we are attempting to provision the server in
+    # Acquire a public IP address in the isolated network we are
+    # attempting to provision the server in
     - name: Acquire public IP address for plex server
       ngine_io.cloudstack.cs_ip_address:
         network: "{{ network_name }}"
@@ -43,36 +54,29 @@
     - debug:
         msg: Acquired public ip address {{ public_ip_address.ip_address }}
 
-
     # Create running vm instance of the plex server
-    # NOTE: default disk offering is too small, so increase to 10 GB as 5 is probably
-    #   not quite enough, though only uses a bit over 2GB after initial install of
-    #   plexmediaserver files
+    # NOTE: default disk offering is too small, so increase to 10 GB
     - name: Create plex server instance
       ngine_io.cloudstack.cs_instance:
-        name: plex
+        name: "{{ server_name }}"
         zone: "{{ zone_name }}"
-        template: "{{ plex_template_name }}"
-        service_offering: "Medium Instance"
-        root_disk_size: 10
+        template: "{{ vm_template_name }}"
+        service_offering: "{{ service_offering }}"
+        root_disk_size: "{{ root_disk_size }}"
         networks:
           - "{{ network_name }}"
-        ssh_key: plex
+        ssh_key: "{{ manager_identity }}"
 
-    # Note: Again creating the instance will take time and may need to wait for it to be up to
-    #   continue here.
-    #   Although on first running this, it apears to be synchronous with the starting up mode,
-    #   this doesn't return until the server has started, unlike when registering a template.
-
-    # Now we setup static NAT translation from the public ip address we just acquired to
-    # the server on the isolated network.  This is one way of assigning public ip addresses
-    # to servers.  All requests to the public ip address will be statically tranlated to
-    # be requests to/from this new server in the isolated network
+    # Now we setup static NAT translation from the public ip address
+    # we just acquired to the server on the isolated network.  This is
+    # one way of assigning public ip addresses to servers.  All
+    # requests to the public ip address will be statically tranlated
+    # to be requests to/from this new server in the isolated network
     - name: Setup static NAT translation from the public ip we acquired to our plex server
       ngine_io.cloudstack.cs_staticnat:
         ip_address: "{{ public_ip_address.ip_address }}"
         zone: "{{ zone_name }}"
-        vm: plex
+        vm: "{{ server_name }}"
 
     # Add firewall rules to allow ingress on the public ip firewall now associated
     # with this server.  Here we just open up all traffic, but we could/should
@@ -98,12 +102,26 @@
         icmp_type: -1
         protocol: icmp
 
-    # for the next set of tasks, add this new host to our ansible management inventory
-    - name: Add this new server as a host in our ansible management inventory
+    # for the next set of tasks, add this new host to a temporary group
+    # name, so that for next part we can configure the new server we created
+    # from ansible as if it is part of the ansible inventory
+    - name: Add this new server as a host in our temporary ansible inventory group
       add_host:
         name: "{{ public_ip_address.ip_address }}"
-        groups: plex
-        
+        hostname: "{{ server_name }}"
+        groups: new_server
+
+    # It takes a while for ssh to come up on the new server, before we try
+    # and gather info in start of next step, first ensure the new host
+    # ssh port 22 appears to be open
+    - name: Wait for ssh to become available before contiuing to provision the new server
+      wait_for:
+        host: "{{ public_ip_address.ip_address }}"
+        port: 22
+        delay: 5
+
+
+
 # At this point we have registered the server template, spun up the plex server from
 # that template, acquired a public ip address for the server, set static NAT
 # translation from the ip to the plex server, and set the ingress rules to allow
@@ -115,10 +133,10 @@
 
 # We need to now switch to provisioning the new plex server itself through ansible,
 # using the ssh key we registered and injected into the server when it was created.
-- hosts: plex
+- hosts: new_server
+  
   vars:
     ansible_user: "ubuntu"
-    # we are accessing the ubuntu user but need to become root to perform all tasks
     ansible_become: true
 
     plexserver_key_url: "https://downloads.plex.tv/plex-keys/PlexSign.key"
@@ -135,13 +153,10 @@
     - name: Update apt-get repo and cache
       apt:
         update_cache: yes
-        force_apt_get: yes
-        cache_valid_time: 3600
 
     - name: Upgrade all apt packages
       apt:
         upgrade: dist
-        force_apt_get: yes
 
     # Setup plexserver media package repository in this servers list of packages
     - name: Get the plexserver signing key to set up apt repository securely
@@ -193,7 +208,7 @@
 # configure media libraries, like this:
 #
 # $ ssh 192.168.0.158 -L 8888:localhost:32400
-# $ ssh -i keys/ansiblemanagement.key -oIdentitiesOnly=yes ubuntu@192.168.0.157 -L 8888:localhost:32400
+# $ ssh -i keys/ansiblemanagement.key -oIdentitiesOnly=yes ubuntu@192.168.0.158 -L 8888:localhost:32400
 # This creates a tunnel locally on port 8888 to the plex web server serving on port 32400
 # at the public ip we just created and assigned to the server (change 192.168.0.158
 # for the allocated ip).

@@ -1,0 +1,554 @@
+# This ansible playbook attempts to create and configure a basic working LAMP stack
+# on an Ubuntu 22.04 Jammy server.
+#
+# We follow this guide: https://www.linode.com/docs/guides/how-to-install-a-lamp-stack-on-ubuntu-22-04/
+# TODO: all of the single server VMs start with this same initial setup to create
+# the VM, acquire a public IP, setup static NAT and configure firewall.
+# We should see if we can pull this out to a role at least
+- hosts: manager
+  
+  vars:
+    server_name: lamp
+    service_offering: "Medium Instance"
+    root_disk_size: 10
+    vm_template_name: "Ubuntu Server 22.04 LTS (Jammy Jellyfish) x86_64"
+    zone_name: "Zone1"
+    network_name: "HarterHouseNet"
+    manager_identity: ansible-management-key
+    manager_key: 'keys/ansiblemanagement.key.pub'
+    
+  tasks:
+
+    # Ensure that the needed server template is registerd and downloaded
+    - name: Ensure that the needed server template image is registered and downloaded
+      ngine_io.cloudstack.cs_template:
+        name: "{{ vm_template_name }}"
+        #name: "Ubuntu Server 22.04 LTS (Jammy Jellyfish) x86_64"
+        url: "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64-disk-kvm.img"
+        display_text: "{{ vm_template_name }}"
+        cross_zones: true
+        hypervisor: "KVM"
+        format: "RAW"
+        os_type: "Other Ubuntu (64-bit)"
+
+    # Note: If the server template was not registered, it will take some time to download.
+    #    The following may not work until the template has finished downloading and
+    #    being registered
+    # Note: The following assumes that the guest isolated network has already been created
+    #    and is configured with egress rules that allow the server to access the internet
+
+    # Register our ansible management key to use to manage the lamp server
+    - name: Register our ansible management key to manage the lamp server
+      ngine_io.cloudstack.cs_sshkeypair:
+        name: "{{ manager_identity }}"
+        public_key: "{{ lookup('file', '{{ manager_key }}') }}"
+
+    # Acquire a public IP address in the isolated network we are
+    # attempting to provision the server in
+    - name: Acquire public IP address for lamp server
+      ngine_io.cloudstack.cs_ip_address:
+        network: "{{ network_name }}"
+        zone: "{{ zone_name }}"
+      register: public_ip_address
+
+    - debug:
+        msg: Acquired public ip address {{ public_ip_address.ip_address }}
+
+    # Create running vm instance of the lamp server
+    # NOTE: default disk offering is too small, so increase to 10 GB
+    - name: Create lamp server instance
+      ngine_io.cloudstack.cs_instance:
+        name: "{{ server_name }}"
+        zone: "{{ zone_name }}"
+        template: "{{ vm_template_name }}"
+        service_offering: "{{ service_offering }}"
+        root_disk_size: "{{ root_disk_size }}"
+        networks:
+          - "{{ network_name }}"
+        ssh_key: "{{ manager_identity }}"
+
+    # Now we setup static NAT translation from the public ip address
+    # we just acquired to the server on the isolated network.  This is
+    # one way of assigning public ip addresses to servers.  All
+    # requests to the public ip address will be statically tranlated
+    # to be requests to/from this new server in the isolated network
+    - name: Setup static NAT translation from the public ip we acquired to our lamp server
+      ngine_io.cloudstack.cs_staticnat:
+        ip_address: "{{ public_ip_address.ip_address }}"
+        zone: "{{ zone_name }}"
+        vm: "{{ server_name }}"
+
+    # Add firewall rules to allow ingress on the public ip firewall now associated
+    # with this server.  Here we just open up all traffic, but we could/should
+    # be a bit more selective and only open up what is needed for the server
+    - name: Allow all inbound TCP/UDP traffic on the public ip
+      ngine_io.cloudstack.cs_firewall:
+        ip_address: "{{ public_ip_address.ip_address }}"
+        zone: "{{ zone_name }}"
+        cidr: 0.0.0.0/0
+        start_port: 1
+        end_port: 65535
+        protocol: '{{ item }}'
+      with_items:
+        - tcp
+        - udp
+        
+    - name: Allow all inbound ICMP traffic on the public ip
+      ngine_io.cloudstack.cs_firewall:
+        ip_address: "{{ public_ip_address.ip_address }}"
+        zone: "{{ zone_name }}"
+        cidr: 0.0.0.0/0
+        icmp_code: -1
+        icmp_type: -1
+        protocol: icmp
+   
+    # for the next set of tasks, add this new host to a temporary group
+    # name, so that for next part we can configure the new server we created
+    # from ansible as if it is part of the ansible inventory
+    - name: Add this new server as a host in a temporary ansible inventory group
+      add_host:
+        name: "{{ public_ip_address.ip_address }}"
+        groups: new_server
+
+    # It takes a while for ssh to come up on the new server, before we try
+    # and gather info in start of next step, first ensure the new host
+    # ssh port 22 appears to be open
+    - name: Wait for ssh to become available before contiuing to provision the new server
+      wait_for:
+        host: "{{ public_ip_address.ip_address }}"
+        port: 22
+        delay: 5
+        
+
+
+# At this point we have registered the server template, spun up the lamp server from
+# that template, acquired a public ip address for the server, set static NAT
+# translation from the ip to the lamp server, and set the ingress rules to allow
+# traffic into the server.
+
+# We need to now switch to provisioning the new lamp server itself through ansible,
+# using the ssh key we registered and injected into the server when it was created.
+# Whatever the server name is we are using, we created a group with the newly
+# acquired ip_address for that server as a target, but to access the group name,
+# need to look back into manager set of hostvars to acquire the group name here
+- hosts: new_server
+  
+  vars:
+    # identitiy information to connect to this new server
+    ansible_user: "ubuntu"
+    ansible_become: true
+
+    # configuration settings for apache server
+    apache_config_file: /etc/apache2/apache2.conf
+    apache_mpm_file: /etc/apache2/mods-available/mpm_prefork.conf
+    lamp_domain: "harter.priv"
+    lamp_fqdn: "lamp.{{ lamp_domain }}"
+    apache_vhost_file: "/etc/apache2/sites-available/{{ lamp_fqdn }}.conf"
+
+    # configuration settings for mysql
+    mysql_database: webdata
+    mysql_user: webuser
+    mysql_password: password
+    mysql_root_password: password
+
+    # configuration settings for php
+    php_config_file: /etc/php/8.1/apache2/php.ini
+
+    # settings for setting up self signed certificates on the lamp server
+    cert_dir: "/etc/ssl/certs"
+    private_dir: "/etc/ssl/private"
+    root_key: "{{ private_dir }}/RootCA.key"
+    root_crt: "{{ cert_dir }}/RootCA.crt"
+    root_subj: "/CN={{ lamp_domain }}/C=US/ST=Texas/L=Commerce/O=LAMP Self Signing Root CA/emailAddress=webmaster@localhost"
+    
+    server_key: "{{ private_dir }}/{{ lamp_fqdn }}.key"
+    server_csr: "{{ private_dir }}/{{ lamp_fqdn }}.csr"
+    server_crt: "{{ cert_dir }}/{{ lamp_fqdn }}.crt"
+    csr_conf: "{{ private_dir }}/{{ lamp_fqdn }}.csr.conf"
+    crt_conf: "{{ private_dir }}/{{ lamp_fqdn }}.crt.conf"
+
+
+  tasks:
+    # Make sure node package list is updated and all packages upgraded
+    - name: Update apt-get repo and cache
+      apt:
+        update_cache: true
+
+    - name: Upgrade all apt packages
+      apt:
+        upgrade: dist
+
+    - name: Install python 3 MySql library access for use by ansible
+      apt:
+        update_cache: true
+        name: python3-mysqldb
+        state: present
+    
+    # install LAMP (Linux Apache Mysql PHP)
+    - name: Install apache2 server (linux Apache mysql php)
+      apt:
+        name: apache2
+
+    - name: Install mysql server (linux apache Mysql php)
+      apt:
+        name: mysql-server
+
+    - name: Install PHP and needed modules (linux apache mysql PHP)
+      apt:
+        pkg:
+          - php
+          - libapache2-mod-php
+          - php-mysql
+          - php-curl
+          - php-json
+          - php-cgi
+
+      # optional example of putting up a WordPress site on the lamp server
+      # - name: Install WordPress php components
+      #   apt:
+      #     pkg:
+      #       - php-gd
+      #       - php-mbstring
+      #       - php-xml
+      #       - php-xmlrpc
+
+    # configure apache settings for good defaults for a basic lamp server
+    - name: Apache2 config Ensure KeepAlive is on to reuse connections and conserve memory
+      lineinfile:
+        path: "{{ apache_config_file }}"
+        regexp: '^KeepAlive .*'
+        line: 'KeepAlive On'
+
+    - name: Apache2 config Ensure MaxKeepAliveRequests is sufficent
+      lineinfile:
+        path: "{{ apache_config_file }}"
+        regexp: '^MaxKeepAliveRequests .*'
+        line: 'MaxKeepAliveRequests 50'
+
+    - name: Apache2 config Ensure KeepAliveTimeout is sufficent
+      lineinfile:
+        path: "{{ apache_config_file }}"
+        regexp: '^KeepAliveTimeout .*'
+        line: 'KeepAliveTimeout 5'
+
+    - name: Apache2 config multi-processing module settings (for 1GB vm currently)
+      template:
+        src: roles/lamp/templates/mpm_prefork.conf
+        dest: "{{ apache_mpm_file }}"
+
+    # setup ufw firewall for apache.  ufw is default firewall package in
+    # ubuntu servers currently.  On cloudstack or other cloud network can probably
+    # better? use network firewall rules for ingress to the node
+    - name: Allow OpenSSH through ufw firewall
+      ufw:
+        rule: allow
+        name: OpenSSH
+
+    # Note: use "Apache" if just want http/80 access
+    # Note: or probably more useful, use "Apache Secure" to limit to htts/443 access
+    - name: Allow Apache (http & https) through ufw firewall
+      ufw:
+        rule: allow
+        name: "Apache Full"
+
+    - name: Enable ufw firewall
+      ufw:
+        state: enabled
+
+    # Note: can verify your ufw firewall settings using
+    #   $ ufw status
+    - name: Verify ufw firewall settings
+      command: ufw status
+      register: ufw_status
+
+    - debug:
+        msg: "{{ ufw_status.stdout }}"
+
+    # Disable mpm_event module and enable mpm_prefork module
+    - name: Apache2 config Ensure that mpm_event module is disabled
+      command: a2dismod mpm_event
+      
+    - name: Apache2 config Ensure that mpm_prefork module is enabled
+      command: a2enmod mpm_prefork
+
+    # ensure apache2 service is restarted and enabled
+    - name: Apache2 Restart apache2 service to pick up config and ensure it is enabled on reboot
+      service:
+        name: apache2
+        state: restarted
+        enabled: yes
+      
+    # NOTE: apache is up and running, only http is configure, should be able to open
+    # http://assigned_public_ip
+    # and access the default page
+
+    # Configure Virtual Host for example domain
+    - name: Apache2 config create virtual host config file {{ lamp_fqdn }}
+      template:
+        src: roles/lamp/templates/example.com.conf
+        dest: "{{ apache_vhost_file }}"
+    
+    - name: Apache2 config ensure /var/www/html/{{ lamp_fqdn }} directory is created and permissions as needed for use by apache2 server
+      file:
+        path: "/var/www/html/{{ lamp_fqdn }}/{{ item }}"
+        state: directory
+      loop:
+        - public_html
+        - logs
+      
+    - name: Apache2 config ensure public_html is owned by www-data
+      file:
+        path: "/var/www/html/{{ lamp_fqdn }}/public_html"
+        recurse: true
+        owner: www-data
+        group: www-data
+        mode: 0755
+
+    - name: Apache2 config Enable example vhost site to be served
+      command: a2ensite {{ lamp_fqdn }}
+
+    - name: Apache2 config disable default site as a precaution from its misuse
+      command: a2dissite 000-default.conf
+      
+    - name: Apache2 config Reload apache2 service to pick up new vhost configuration
+      service:
+        name: apache2
+        state: reloaded
+
+    # NOTE: the reload should succeed, if it fails something misconfigure
+    # NOTE: at this point should be able to point browser to the vhost fqdn, and
+    #   assuming that name resolution is working should be able to access the
+    #   document root.
+
+    
+    # Start configuration of the mysql database for use in apache php web pages
+    - name: MySQL config create an example webdata database
+      mysql_db:
+        name:
+          - "{{ mysql_database }}"
+        state: present
+
+    - name: MySQL config create an example user to use the database
+      mysql_user:
+        name: "{{ mysql_user }}"
+        password: "{{ mysql_password }}"
+        priv: "{{ mysql_database}}.*:ALL"
+
+    - name: MySQL config set a root user password
+      mysql_user:
+        user: root
+        login_password: ''
+        password: '{{ mysql_root_password }}'
+        host: localhost
+        state: present
+        
+    # guides usually do the $ mysql_secure_installation here, we will perform following by hand
+    # remove anonymous users
+    # disallow root login remotely
+    # remove test database and access to it
+    # reload privilege tables
+    - name: MySQL config Ensure anonymous users are absent
+      mysql_user:
+        login_password: "{{ mysql_root_password }}"
+        name: ''
+        state: absent
+        host_all: true
+
+    - name: Remove remote root access from database
+      mysql_query:
+        login_password: "{{ mysql_root_password }}"
+        query:
+          - DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1')
+
+    - name: MySQL config Ensure test database is absent
+      mysql_db:
+        login_password: "{{ mysql_root_password }}"
+        name: test
+        state: absent
+
+    - name: Ensure MySql service is restarted and enabled
+      service:
+        name: mysql
+        state: restarted
+        enabled: yes
+    
+    # start configuration of php services
+    - name: Php config Verfigy php version at least 8.1 
+      command: php -v
+      register: php_version
+
+    - debug:
+        msg: "{{ php_version.stdout }}"
+
+
+    - name: Php config ensure error logging reports useful errors
+      lineinfile:
+        path: "{{ php_config_file }}"
+        regexp: '^; error_reporting.*'
+        line: 'error_reporting = E_COMPILE_ERROR | E_RECOVERABLE_ERROR | E_ERROR | E_CORE_ERROR'
+
+    - name: Php config specify the error log location for php errors
+      lineinfile:
+        path: "{{ php_config_file }}"
+        regexp: '^;error_log = syslog.*'
+        line: 'error_log = /var/log/php/error.log'
+        
+    - name: Php config specify maximum input time
+      lineinfile:
+        path: "{{ php_config_file }}"
+        regexp: '^; max_input_time.*'
+        line: 'max_input_time = 30'
+
+    - name: Php config ensure php error log directory exists and can be accessed by apache
+      file:
+        path: "/var/log/php"
+        state: directory
+        owner: www-data
+        group: www-data
+
+    - name: Php config restart the apache server to pick up php config changes
+      service:
+        name: apache2
+        state: restarted
+
+    # create a page to test apache and php operations
+    # if everything is working this shold be viewable at
+    #    http://public_ip/phptest.php
+    # You would need to set up dns to resolve the name to go to
+    #    http://{{lamp_fqdn}}/phptest.php
+    # assuming you have set up DNS name resolution to resolve the fully qualified
+    # domain name you set above to the public ip address assigned to the server
+    - name: LAMP apache/php test, create a test page that shows php is working to insert variable values on page
+      template:
+        src: roles/lamp/templates/phptest.php
+        dest: "/var/www/html/{{ lamp_fqdn }}/public_html/phptest.php"
+
+    
+    # Use the following guides
+    # linode tutorial: https://www.linode.com/docs/guides/ssl-apache2-debian-ubuntu/
+    # linode tutorial: https://www.linode.com/docs/guides/create-a-self-signed-tls-certificate/
+    # to give example of creating a self signed certificate to serve
+    # https/ssl traffic.
+
+    # 1. First set up ca certificates.  I am actually using a bit more of a complex
+    # procedure than the guide.  Lets create a self signed root certificate,
+    # first.
+    - name: Apache2 ssl config 1. create a self signed root certificate and root CA key
+      shell: |
+        openssl req \
+            -x509 \
+            -sha256 \
+            -days 3650 \
+            -nodes \
+            -newkey rsa:4096 \
+            -subj  "{{ root_subj }}" \
+            -keyout {{ root_key }} -out {{ root_crt }}
+
+    # 2. now we create a private key that is for this specific lamp server vhost
+    - name: Apache2 ssl config 2. create a server key
+      shell: |
+        openssl genrsa -out {{ server_key }} 4096
+
+    # 3. for the signed cert to work in browsers, we need to correctly create
+    # the configuration for the self signing request
+    - name: Apache2 ssl config 3. create certificate signing request (csr) configuration for our signing attempt
+      shell: |
+        cat > {{ csr_conf }} << EOF
+        [ req ]
+        default_bits = 4096
+        prompt = no
+        default_md = sha256
+        req_extensions = req_ext
+        distinguished_name = dn
+
+        [ dn ]
+        C = US
+        ST = Texas
+        L = Commerce
+        O = LAMP Server Organization
+        OU = LAMP Server
+        CN = {{ lamp_fqdn }}
+        emailAddress = admin@${{ lamp_fqdn }}
+
+        [ req_ext ]
+        subjectAltName = @alt_names
+
+        [ alt_names ]
+        DNS.1 = {{ lamp_fqdn }}
+        #DNS.2 = *.{{ lamp_domain }}
+        #DNS.3 = *.consoleproxy.{{ lamp_domain }}
+        
+        EOF
+
+    # 4. we are ready to generate the certificate signing request (csr) using
+    # the server private key and the csr configuration, if we wanted to sign
+    # with a real CA, this would be the file we would send them to get our crt
+    - name: Apache2 ssl config 4. create the actual certificate signing request (csr)
+      shell: |
+        openssl req -new \
+          -key {{ server_key }} \
+          -out {{ server_csr }} \
+          -config {{ csr_conf }}
+
+    # 5. Now we need a certificate configuration file for the actual signing
+    # NOTE: these properties apper aot be important, especially having basicConstraints
+    # and alot names here
+    - name: Apache 2 ssl config 5. create certificate configuration properties file for the signing
+      shell: |
+        cat > {{ crt_conf }} <<EOF
+        authorityKeyIdentifier=keyid,issuer
+        basicConstraints=CA:FALSE
+        keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment
+        subjectAltName = @alt_names
+        
+        [alt_names]
+        DNS.1 = {{ lamp_fqdn }}
+        #DNS.2 = *.{{ lamp_domain }}
+        #DNS.3 = *.consoleproxy.{{ lamp_domain }}
+        EOF
+        
+    # 6. We can now sign the key to generate the server certificate crt file, using
+    # our self signed root certificate and the certificate configuration
+    - name: Apache2 ssl config 6. sign the server certificate using our self signed Root CA
+      shell: | 
+        openssl x509 -req \
+          -in {{ server_csr }} \
+          -CA {{ root_crt }} -CAkey {{ root_key }} \
+          -CAcreateserial -out {{ server_crt }} \
+          -days 3650 \
+          -sha256 -extfile {{ crt_conf }}
+       
+    # now we need to update our vhost configuration to specify vhost on 443 port
+    # and setup were ssl certs are and how to use them
+    - name: Apache2 ssl config create virtual host config file {{ lamp_fqdn }} for ssl certs
+      template:
+        src: roles/lamp/templates/sslcert.example.com.conf
+        dest: "{{ apache_vhost_file }}"
+
+    # enable the ssl module
+    - name: Apache2 ssl config enable ssl module
+      command: a2enmod ssl
+
+    # ensure site is (still) enabled
+    - name: Apache2 ssl config enable the example site
+      command: a2ensite {{ lamp_fqdn }}
+      
+    # enable ssl and restart
+    - name: Apache2 Restart apache2 service to pick up config and ensure it is enabled on reboot
+      service:
+        name: apache2
+        state: restarted
+        enabled: yes
+
+# NOTE: the site should redirect attempts to connect to http/80 to https/443
+# If you want to connect wihtout any browser errors you need to
+# 1. Add the RootCA.crt key (in the /etc/ssl/cert subdirectory) as a known authority
+#    into your browser: https://docs.vmware.com/en/VMware-Adapter-for-SAP-Landscape-Management/2.1.0/Installation-and-Administration-Guide-for-VLA-Administrators/GUID-0CED691F-79D3-43A4-B90D-CD97650C13A0.html
+#
+# 2. The host name, for example lamp.harter.priv, has to resolve through DNS to the
+#    public ip address of your vm machine.  You can test this locally by simply
+#    adding the hostname resolution to your /etc/hosts file, e.g.
+#    $ cat /etc/hosts
+#    ...
+#    # added hosts for cloud vm servers
+#    192.168.0.159 lamp.harter.priv

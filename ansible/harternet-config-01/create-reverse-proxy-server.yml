@@ -2,22 +2,30 @@
 # html/https servers in our network.
 #
 # Setup and ideas mostly cribbed from: https://www.linuxbabe.com/linux-server/run-apache-nginx-haproxy-on-same-server-debian-ubuntu-centos
+#
+#
+#
 - hosts: manager
+  
   vars:
+    server_name: proxy
+    service_offering: "Medium Instance"
+    root_disk_size: 10
+    vm_template_name: "Ubuntu Server 22.04 LTS (Jammy Jellyfish) x86_64"
     zone_name: "Zone1"
     network_name: "HarterHouseNet"
-    server_template_name: "Ubuntu Server 22.04 LTS (Jammy Jellyfish) x86_64"
-    server_name: proxy
+    manager_identity: ansible-management-key
+    manager_key: 'keys/ansiblemanagement.key.pub'
     
   tasks:
 
     # Ensure that the needed server template is registerd and downloaded
     - name: Ensure that the needed server template image is registered and downloaded
       ngine_io.cloudstack.cs_template:
-        name: "{{ server_template_name }}"
+        name: "{{ vm_template_name }}"
         #name: "Ubuntu Server 22.04 LTS (Jammy Jellyfish) x86_64"
         url: "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64-disk-kvm.img"
-        display_text: "{{ server_template_name }}"
+        display_text: "{{ vm_template_name }}"
         cross_zones: true
         hypervisor: "KVM"
         format: "RAW"
@@ -28,15 +36,16 @@
     #    being registered
     # Note: The following assumes that the guest isolated network has already been created
     #    and is configured with egress rules that allow the server to access the internet
-
+    
     # Register our ansible management key to use to manage the proxy server
     - name: Register our ansible management key to manage the proxy server
       ngine_io.cloudstack.cs_sshkeypair:
-        name: "{{ server_name }}"
-        public_key: "{{ lookup('file', 'keys/ansiblemanagement.key.pub') }}"
+        name: "{{ manager_identity }}"
+        public_key: "{{ lookup('file', 'keys/{{ manager_key }}') }}"
 
         
-    # Acquire a public IP address in the isolated network we are attempting to provision the server in
+    # Acquire a public IP address in the isolated network we are
+    # attempting to provision the server in
     - name: Acquire public IP address for proxy server
       ngine_io.cloudstack.cs_ip_address:
         network: "{{ network_name }}"
@@ -45,30 +54,25 @@
 
     - debug:
         msg: Acquired public ip address {{ public_ip_address.ip_address }}
-
-
+        
     # Create running vm instance of the proxy server
     # NOTE: default disk offering is too small, so increase to 10 GB 
     - name: Create proxy server instance
       ngine_io.cloudstack.cs_instance:
         name: "{{ server_name }}"
         zone: "{{ zone_name }}"
-        template: "{{ server_template_name }}"
-        service_offering: "Medium Instance"
-        root_disk_size: 10
+        template: "{{ vm_template_name }}"
+        service_offering: "{{ service_offering }}"
+        root_disk_size: "{{ root_disk_size }}"
         networks:
           - "{{ network_name }}"
-        ssh_key: "{{ server_name }}"
+        ssh_key: "{{ manager_identity }}"
 
-    # Note: Again creating the instance will take time and may need to wait for it to be up to
-    #   continue here.
-    #   Although on first running this, it apears to be synchronous with the starting up mode,
-    #   this doesn't return until the server has started, unlike when registering a template.
-
-    # Now we setup static NAT translation from the public ip address we just acquired to
-    # the server on the isolated network.  This is one way of assigning public ip addresses
-    # to servers.  All requests to the public ip address will be statically tranlated to
-    # be requests to/from this new server in the isolated network
+    # Now we setup static NAT translation from the public ip address
+    # we just acquired to the server on the isolated network.  This is
+    # one way of assigning public ip addresses to servers.  All
+    # requests to the public ip address will be statically tranlated
+    # to be requests to/from this new server in the isolated network
     - name: Setup static NAT translation from the public ip we acquired to our proxy server
       ngine_io.cloudstack.cs_staticnat:
         ip_address: "{{ public_ip_address.ip_address }}"
@@ -78,7 +82,7 @@
     # Add firewall rules to allow ingress on the public ip firewall now associated
     # with this server.  Here we just open up all traffic, but we could/should
     # be a bit more selective and only open up what is needed for the server
-    - name: Allow all inbound TCP/UDP traffic on the public ip
+   - name: Allow all inbound TCP/UDP traffic on the public ip
       ngine_io.cloudstack.cs_firewall:
         ip_address: "{{ public_ip_address.ip_address }}"
         zone: "{{ zone_name }}"
@@ -99,11 +103,23 @@
         icmp_type: -1
         protocol: icmp
 
-    # for the next set of tasks, add this new host to our ansible management inventory
+    # for the next set of tasks, add this new host to a temporary group
+    # name, so that for next part we can configure the new server we created
+    # from ansible as if it is part of the ansible inventory
     - name: Add this new server as a host in our ansible management inventory
       add_host:
         name: "{{ public_ip_address.ip_address }}"
-        groups: "{{ server_name }}"
+        groups: new_server
+
+    # It takes a while for ssh to come up on the new server, before we try
+    # and gather info in start of next step, first ensure the new host
+    # ssh port 22 appears to be open
+    - name: Wait for ssh to become available before contiuing to provision the new server
+      wait_for:
+        host: "{{ public_ip_address.ip_address }}"
+        port: 22
+        delay: 5
+
 
 
 # At this point we have registered the server template, spun up the proxy server from
@@ -111,16 +127,12 @@
 # translation from the ip to the plex server, and set the ingress rules to allow
 # traffic into the server.
 
-# TODO: The instance comes up pretty quickly, but still not quick enough.
-#    We are often failing at this point because can't quite ssh into the
-#    running proxy server yet.
-
 # We need to now switch to provisioning the new plex server itself through ansible,
 # using the ssh key we registered and injected into the server when it was created.
-- hosts: "proxy"
+- hosts: new_server
   vars:
+    # identity information to connect to this new server
     ansible_user: "ubuntu"
-    # we are accessing the ubuntu user but need to become root to perform all tasks
     ansible_become: true
     
   tasks:
@@ -129,17 +141,15 @@
     - name: Update apt-get repo and cache
       apt:
         update_cache: yes
-        force_apt_get: yes
-        cache_valid_time: 3600
 
     - name: Upgrade all apt packages
       apt:
         upgrade: dist
-        force_apt_get: yes
 
     # Install nginx and setup basic configuration for reverse proxy
     - name: Install the nginx package to use as reverse proxy
       apt:
+        update_cache: true
         name: nginx
 
     # copy any generated certificates and keys needed for reverse proxy
@@ -201,6 +211,12 @@
     
     # TODO: The following command is interactive, can we provide options to
     #   automate if needed?
+    # NOTE: this also requires that the dns name given here plex.harter.pro
+    #   is publicably routable, and that requests to this on port 80/443 show up
+    #   here on this reverse proxy server machine at those ports.
+    #   (e.g. for our home this means setting dns record for plex.harter.pro
+    #   to route to home public ip, and setting port forwarding on home
+    #   router from ports 80/443 to this new server ip.
     #- name: Use certbot to get a valid TLS certificate for plex.harter.pro domain
     #  command: certbot --nginx --agree-tos --redirect --hsts --staple-ocsp --email derek@harter.pro -d plex.harter.pro
 

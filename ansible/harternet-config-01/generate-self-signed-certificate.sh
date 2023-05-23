@@ -48,7 +48,7 @@ then
     openssl req -x509 \
             -sha256 -days 3650 \
             -nodes \
-            -newkey rsa:2048 \
+            -newkey rsa:4096 \
             -subj  "${root_subject}"\
             -keyout ${root_key} -out ${root_crt}
     echo ""
@@ -64,7 +64,7 @@ echo ""
 echo "3. Create configuration file for this certificate signing request"
 cat > ${csr_conf} <<EOF
 [ req ]
-default_bits = 2048
+default_bits = 4096
 prompt = no
 default_md = sha256
 req_extensions = req_ext
