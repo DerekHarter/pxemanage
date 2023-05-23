@@ -27,8 +27,8 @@ autoinstall:
   identity:
     hostname: {{ hostname }}
     password: $6$MAZ5PExqxansCj4j$ZXzNVaQbc7ZgqyrfC706X3odA1ldzCiU6uVMG39e6JAFAEawpM4bG4RifShss4R/E1ZJGWAAPZzyEGnCCExib1
-    realname: Apache cloudstack ssh insertion user account
-    username: cloudstack
+    realname: Apache ansible cloudmanager ssh insertion user account
+    username: cloudmanager
   kernel:
     package: linux-generic
   keyboard:
@@ -38,8 +38,8 @@ autoinstall:
   locale: en_US.UTF-8
   late-commands:
     - |
-      curtin in-target --target=/target -- cat > /etc/sudoers.d/cloudstack << EOF
-      cloudstack ALL=(ALL) NOPASSWD: ALL
+      curtin in-target --target=/target -- cat > /etc/sudoers.d/cloudmanager << EOF
+      cloudmanager ALL=(ALL) NOPASSWD: ALL
       EOF
     - curtin in-target --target=/target -- sed -i 's/GRUB_TIMEOUT=0/GRUB_TIMEOUT=1/g' /etc/default/grub
     - curtin in-target --target=/target -- update-grub

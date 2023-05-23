@@ -35,7 +35,7 @@ service_list:
   - "apache2"
 
 # user account used if needing to remote manage host, e.g. like ansible user
-username: cloudstack
-password: cloudstack
+username: cloudmanager
+password: cloudmanager
 identity: "../ansible/harternet-config-01/keys/ansiblemanagement.key"
 ssh_args: -oIdentitiesOnly=yes  

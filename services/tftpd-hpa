@@ -8,6 +8,6 @@
 # -vvv is needed as it will cause verbose logging to syslog, and we need these
 #    syslog events to determine when servers are in process of installation
 TFTP_USERNAME="tftp"
-TFTP_DIRECTORY="/home/dash/repos/cloudstack/pxemanage/files/tftp"
+TFTP_DIRECTORY="/home/cloudmanager/hartercloud/pxemanage/files/tftp"
 TFTP_ADDRESS=":69"
 TFTP_OPTIONS="--secure -vvv"
